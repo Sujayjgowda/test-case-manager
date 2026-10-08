@@ -1,0 +1,28 @@
+{
+  "name": "test-case-manager",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A web application to track and automate writing test cases based on test scenarios",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "npm run dev --workspace=@tcm/api",
+    "dev:web": "npm run dev --workspace=@tcm/web",
+    "build": "npm run build --workspaces",
+    "build:api": "npm run build --workspace=@tcm/api",
+    "build:web": "npm run build --workspace=@tcm/web",
+    "db:migrate": "npm run db:migrate --workspace=@tcm/api",
+    "db:seed": "npm run db:seed --workspace=@tcm/api",
+    "lint": "npm run lint --workspaces",
+    "test": "npm run test --workspaces"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

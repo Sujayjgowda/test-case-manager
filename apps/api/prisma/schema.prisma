@@ -1,0 +1,115 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Project {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  key         String   @unique
+  status      String   @default("active")
+  settings    String?  @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  modules Module[]
+
+  @@map("projects")
+}
+
+model Module {
+  id          Int      @id @default(autoincrement())
+  projectId   Int
+  name        String
+  description String?
+  parentId    Int?
+  orderIndex  Int      @default(0) @map("order_index")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parent        Module?   @relation("ModuleHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children      Module[]  @relation("ModuleHierarchy")
+  scenarios     Scenario[]
+
+  @@map("modules")
+}
+
+model Scenario {
+  id             Int      @id @default(autoincrement())
+  moduleId       Int
+  title          String
+  description    String?
+  priority       String   @default("medium")
+  tags           String?  @default("[]")
+  preconditions  String?  @map("preconditions")
+  expectedOutcome String? @map("expected_outcome")
+  status         String   @default("draft")
+  createdBy      String?  @map("created_by")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  module    Module     @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  testCases TestCase[]
+
+  @@map("scenarios")
+}
+
+model TestCase {
+  id            Int      @id @default(autoincrement())
+  scenarioId    Int
+  title         String
+  description   String?
+  preConditions String?  @map("pre_conditions")
+  postConditions String? @map("post_conditions")
+  status        String   @default("draft")
+  priority      String   @default("medium")
+  estimatedTime Int?     @map("estimated_time")
+  testData      String?  @default("{}") @map("test_data")
+  aiGenerated   Boolean  @default(false) @map("ai_generated")
+  aiPrompt      String?  @map("ai_prompt")
+  version       Int      @default(1)
+  createdBy     String?  @map("created_by")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  scenario Scenario   @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  steps    TestStep[]
+
+  @@map("test_cases")
+}
+
+model TestStep {
+  id            Int      @id @default(autoincrement())
+  testCaseId    Int
+  stepNumber    Int
+  description   String
+  expectedResult String @map("expected_result")
+  testData      String? @default("{}") @map("test_data")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  testCase TestCase @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+
+  @@map("test_steps")
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  entityType String @map("entity_type")
+  entityId   Int    @map("entity_id")
+  action     String
+  userId     String? @map("user_id")
+  changes    String? @default("{}")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("audit_log")
+}
