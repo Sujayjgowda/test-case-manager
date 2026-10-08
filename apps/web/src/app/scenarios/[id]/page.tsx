@@ -31,10 +31,28 @@ export default function ScenarioDetailPage() {
   });
 
   const generateMutation = useMutation({
-    mutationFn: (data: { prompt?: string; options?: Record<string, unknown> }) =>
-      scenariosApi.generateTestCases(scenarioId, data),
+    mutationFn: async (data: { prompt?: string; options?: Record<string, unknown> }) => {
+      const res = await scenariosApi.generateTestCases(scenarioId, data);
+      const jobId = res.data?.jobId;
+      if (jobId) {
+        // Poll until completion or timeout
+        for (let i = 0; i < 30; i++) {
+          await new Promise((r) => setTimeout(r, 1000));
+          try {
+            const statusRes = await api.get(`/ai/generation/${jobId}`);
+            if (statusRes.data?.status === 'completed' || statusRes.data?.status === 'failed') {
+              break;
+            }
+          } catch {
+            // Ignore polling errors
+          }
+        }
+      }
+      return res.data;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['scenario', scenarioId] });
+      setShowAiPanel(false);
     },
   });
 
