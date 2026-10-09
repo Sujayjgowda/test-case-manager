@@ -35,7 +35,10 @@ export default function TestCasesPage() {
   });
 
   const createMutation = useMutation({
-    mutationFn: (data: typeof formData) => testCasesApi.create(data),
+    mutationFn: (data: typeof formData) => {
+      if (!data.scenarioId) throw new Error('Scenario is required');
+      return testCasesApi.create({ ...data, scenarioId: data.scenarioId });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['test-cases'] });
       setShowCreateForm(false);

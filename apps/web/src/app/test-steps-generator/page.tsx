@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { scenariosApi } from '@/lib/api-client';
+import { localStore } from '@/lib/local-store';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -61,24 +62,32 @@ export default function TestStepsGeneratorPage() {
       }
 
       // Otherwise, call the direct AI generation endpoint
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/ai/generate-test-steps`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          scenarioTitle,
-          scenarioDescription,
-          preconditions,
-          expectedOutcome,
-          additionalInstructions,
-        }),
-      });
+      try {
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1'}/ai/generate-test-steps`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            scenarioTitle,
+            scenarioDescription,
+            preconditions,
+            expectedOutcome,
+            additionalInstructions,
+          }),
+        });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || `Generation failed (${response.status})`);
+        if (response.ok) {
+          return await response.json();
+        }
+      } catch (e) {
+        // Fall through to local generation
       }
 
-      return response.json();
+      return localStore.generateTestSteps({
+        scenarioTitle,
+        scenarioDescription,
+        preconditions,
+        expectedOutcome,
+      });
     },
     onSuccess: (data) => {
       setRetryCountdown(null);

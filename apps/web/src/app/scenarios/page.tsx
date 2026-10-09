@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { scenariosApi, modulesApi } from '@/lib/api-client';
@@ -21,7 +21,7 @@ import {
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 
-export default function ScenariosPage() {
+function ScenariosContent() {
   const searchParams = useSearchParams();
   const moduleId = searchParams.get('moduleId');
   const router = useRouter();
@@ -48,7 +48,10 @@ export default function ScenariosPage() {
   });
 
   const createMutation = useMutation({
-    mutationFn: (data: typeof formData) => scenariosApi.create(data),
+    mutationFn: (data: typeof formData) => {
+      if (!data.moduleId) throw new Error('Module is required');
+      return scenariosApi.create({ ...data, moduleId: data.moduleId });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['scenarios'] });
       setShowCreateForm(false);
@@ -285,5 +288,13 @@ export default function ScenariosPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function ScenariosPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-muted-foreground">Loading scenarios...</div>}>
+      <ScenariosContent />
+    </Suspense>
   );
 }

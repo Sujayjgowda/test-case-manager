@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { localStore } from './local-store';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1';
 
@@ -7,38 +8,132 @@ export const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  timeout: 3500,
 });
+
+function isClientMode(): boolean {
+  if (typeof window === 'undefined') return false;
+  return (
+    window.location.hostname.includes('github.io') ||
+    (!window.location.hostname.includes('localhost') && !window.location.hostname.includes('127.0.0.1'))
+  );
+}
 
 // Projects
 export const projectsApi = {
-  getAll: (params?: { page?: number; limit?: number; status?: string }) =>
-    api.get('/projects', { params }),
-  getById: (id: number) => api.get(`/projects/${id}`),
-  create: (data: { name: string; key: string; description?: string }) =>
-    api.post('/projects', data),
-  update: (id: number, data: Record<string, unknown>) =>
-    api.put(`/projects/${id}`, data),
-  delete: (id: number) => api.delete(`/projects/${id}`),
-  getModules: (id: number) => api.get(`/projects/${id}/modules`),
-  createModule: (projectId: number, data: { name: string; description?: string }) =>
-    api.post(`/projects/${id}/modules`, data),
+  getAll: async (params?: { page?: number; limit?: number; status?: string }) => {
+    if (isClientMode()) return { data: localStore.getProjects() };
+    try {
+      return await api.get('/projects', { params });
+    } catch {
+      return { data: localStore.getProjects() };
+    }
+  },
+  getById: async (id: number) => {
+    if (isClientMode()) return { data: localStore.getProjectById(id) };
+    try {
+      return await api.get(`/projects/${id}`);
+    } catch {
+      return { data: localStore.getProjectById(id) };
+    }
+  },
+  create: async (data: { name: string; key: string; description?: string }) => {
+    if (isClientMode()) return { data: localStore.createProject(data) };
+    try {
+      return await api.post('/projects', data);
+    } catch {
+      return { data: localStore.createProject(data) };
+    }
+  },
+  update: async (id: number, data: Record<string, unknown>) => {
+    try {
+      return await api.put(`/projects/${id}`, data);
+    } catch {
+      return { data: { id, ...data } };
+    }
+  },
+  delete: async (id: number) => {
+    if (isClientMode()) return { data: localStore.deleteProject(id) };
+    try {
+      return await api.delete(`/projects/${id}`);
+    } catch {
+      return { data: localStore.deleteProject(id) };
+    }
+  },
+  getModules: async (id: number) => {
+    if (isClientMode()) return { data: localStore.getModules(id) };
+    try {
+      return await api.get(`/projects/${id}/modules`);
+    } catch {
+      return { data: localStore.getModules(id) };
+    }
+  },
+  createModule: async (projectId: number, data: { name: string; description?: string }) => {
+    if (isClientMode()) return { data: localStore.createModule(projectId, data) };
+    try {
+      return await api.post(`/projects/${projectId}/modules`, data);
+    } catch {
+      return { data: localStore.createModule(projectId, data) };
+    }
+  },
 };
 
 // Modules
 export const modulesApi = {
-  getAll: (params?: { projectId?: number }) => api.get('/modules', { params }),
-  getById: (id: number) => api.get(`/modules/${id}`),
+  getAll: async (params?: { projectId?: number }) => {
+    if (isClientMode()) return { data: localStore.getModules(params?.projectId) };
+    try {
+      return await api.get('/modules', { params });
+    } catch {
+      return { data: localStore.getModules(params?.projectId) };
+    }
+  },
+  getById: async (id: number) => {
+    if (isClientMode()) return { data: localStore.getModuleById(id) };
+    try {
+      return await api.get(`/modules/${id}`);
+    } catch {
+      return { data: localStore.getModuleById(id) };
+    }
+  },
   update: (id: number, data: Record<string, unknown>) => api.put(`/modules/${id}`, data),
-  delete: (id: number) => api.delete(`/modules/${id}`),
-  getScenarios: (id: number) => api.get(`/modules/${id}/scenarios`),
+  delete: async (id: number) => {
+    if (isClientMode()) return { data: localStore.deleteModule(id) };
+    try {
+      return await api.delete(`/modules/${id}`);
+    } catch {
+      return { data: localStore.deleteModule(id) };
+    }
+  },
+  getScenarios: async (id: number) => {
+    if (isClientMode()) return { data: localStore.getScenarios({ moduleId: id }) };
+    try {
+      return await api.get(`/modules/${id}/scenarios`);
+    } catch {
+      return { data: localStore.getScenarios({ moduleId: id }) };
+    }
+  },
 };
 
 // Scenarios
 export const scenariosApi = {
-  getAll: (params?: { moduleId?: number; status?: string; page?: number; limit?: number }) =>
-    api.get('/scenarios', { params }),
-  getById: (id: number) => api.get(`/scenarios/${id}`),
-  create: (data: {
+  getAll: async (params?: { moduleId?: number; status?: string; page?: number; limit?: number }) => {
+    if (isClientMode()) return { data: localStore.getScenarios(params) };
+    try {
+      return await api.get('/scenarios', { params });
+    } catch {
+      return { data: localStore.getScenarios(params) };
+    }
+  },
+  getById: async (id: number) => {
+    if (isClientMode()) return { data: localStore.getScenarioById(id) };
+    try {
+      return await api.get(`/scenarios/${id}`);
+    } catch {
+      return { data: localStore.getScenarioById(id) };
+    }
+  },
+  create: async (data: {
     moduleId: number;
     title: string;
     description?: string;
@@ -46,39 +141,119 @@ export const scenariosApi = {
     tags?: string[];
     preconditions?: string;
     expectedOutcome?: string;
-  }) => api.post('/scenarios', data),
+  }) => {
+    if (isClientMode()) return { data: localStore.createScenario(data) };
+    try {
+      return await api.post('/scenarios', data);
+    } catch {
+      return { data: localStore.createScenario(data) };
+    }
+  },
   update: (id: number, data: Record<string, unknown>) => api.put(`/scenarios/${id}`, data),
-  delete: (id: number) => api.delete(`/scenarios/${id}`),
-  generateTestCases: (
+  delete: async (id: number) => {
+    if (isClientMode()) return { data: localStore.deleteScenario(id) };
+    try {
+      return await api.delete(`/scenarios/${id}`);
+    } catch {
+      return { data: localStore.deleteScenario(id) };
+    }
+  },
+  generateTestCases: async (
     scenarioId: number,
     data: { prompt?: string; options?: Record<string, unknown> }
-  ) => api.post(`/scenarios/${scenarioId}/generate`, data),
-  getGenerationStatus: (scenarioId: number) =>
-    api.get(`/scenarios/${scenarioId}/generation-status`),
+  ) => {
+    if (isClientMode()) return { data: localStore.generateTestCasesForScenario(scenarioId) };
+    try {
+      return await api.post(`/scenarios/${scenarioId}/generate`, data);
+    } catch {
+      return { data: localStore.generateTestCasesForScenario(scenarioId) };
+    }
+  },
+  getGenerationStatus: async (scenarioId: number) => {
+    if (isClientMode()) return { data: { status: 'completed' } };
+    try {
+      return await api.get(`/scenarios/${scenarioId}/generation-status`);
+    } catch {
+      return { data: { status: 'completed' } };
+    }
+  },
 };
 
 // Test Cases
 export const testCasesApi = {
-  getAll: (params?: { scenarioId?: number; status?: string; page?: number; limit?: number }) =>
-    api.get('/test-cases', { params }),
-  getById: (id: number) => api.get(`/test-cases/${id}`),
-  create: (data: {
+  getAll: async (params?: { scenarioId?: number; status?: string; page?: number; limit?: number }) => {
+    if (isClientMode()) return { data: localStore.getTestCases(params) };
+    try {
+      return await api.get('/test-cases', { params });
+    } catch {
+      return { data: localStore.getTestCases(params) };
+    }
+  },
+  getById: async (id: number) => {
+    if (isClientMode()) return { data: localStore.getTestCaseById(id) };
+    try {
+      return await api.get(`/test-cases/${id}`);
+    } catch {
+      return { data: localStore.getTestCaseById(id) };
+    }
+  },
+  create: async (data: {
     scenarioId: number;
     title: string;
     description?: string;
     preConditions?: string;
     postConditions?: string;
     priority?: string;
-  }) => api.post('/test-cases', data),
-  update: (id: number, data: Record<string, unknown>) => api.put(`/test-cases/${id}`, data),
-  delete: (id: number) => api.delete(`/test-cases/${id}`),
-  updateStatus: (id: number, status: string) => api.put(`/test-cases/${id}/status`, { status }),
-  addStep: (testCaseId: number, step: { description: string; expectedResult: string }) =>
-    api.post(`/test-cases/${testCaseId}/steps`, step),
+  }) => {
+    if (isClientMode()) return { data: localStore.createTestCase(data) };
+    try {
+      return await api.post('/test-cases', data);
+    } catch {
+      return { data: localStore.createTestCase(data) };
+    }
+  },
+  update: async (id: number, data: Record<string, unknown>) => {
+    if (isClientMode()) return { data: localStore.updateTestCase(id, data) };
+    try {
+      return await api.put(`/test-cases/${id}`, data);
+    } catch {
+      return { data: localStore.updateTestCase(id, data) };
+    }
+  },
+  delete: async (id: number) => {
+    if (isClientMode()) return { data: localStore.deleteTestCase(id) };
+    try {
+      return await api.delete(`/test-cases/${id}`);
+    } catch {
+      return { data: localStore.deleteTestCase(id) };
+    }
+  },
+  updateStatus: async (id: number, status: string) => {
+    if (isClientMode()) return { data: localStore.updateTestCase(id, { status }) };
+    try {
+      return await api.put(`/test-cases/${id}/status`, { status });
+    } catch {
+      return { data: localStore.updateTestCase(id, { status }) };
+    }
+  },
+  addStep: async (testCaseId: number, step: { description: string; expectedResult: string }) => {
+    if (isClientMode()) return { data: localStore.addStep(testCaseId, step) };
+    try {
+      return await api.post(`/test-cases/${testCaseId}/steps`, step);
+    } catch {
+      return { data: localStore.addStep(testCaseId, step) };
+    }
+  },
   updateStep: (testCaseId: number, stepId: number, data: Record<string, unknown>) =>
     api.put(`/test-cases/${testCaseId}/steps/${stepId}`, data),
-  deleteStep: (testCaseId: number, stepId: number) =>
-    api.delete(`/test-cases/${testCaseId}/steps/${stepId}`),
+  deleteStep: async (testCaseId: number, stepId: number) => {
+    if (isClientMode()) return { data: localStore.deleteStep(testCaseId, stepId) };
+    try {
+      return await api.delete(`/test-cases/${testCaseId}/steps/${stepId}`);
+    } catch {
+      return { data: localStore.deleteStep(testCaseId, stepId) };
+    }
+  },
 };
 
 // Export
