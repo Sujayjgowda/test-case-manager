@@ -22,11 +22,13 @@ function isClientMode(): boolean {
 // Projects
 export const projectsApi = {
   getAll: async (params?: { page?: number; limit?: number; status?: string }) => {
-    if (isClientMode()) return { data: localStore.getProjects() };
+    const list = localStore.getProjects();
+    const wrapped = { data: list, total: list.length, pagination: { total: list.length, page: 1, limit: 100 } };
+    if (isClientMode()) return { data: wrapped };
     try {
       return await api.get('/projects', { params });
     } catch {
-      return { data: localStore.getProjects() };
+      return { data: wrapped };
     }
   },
   getById: async (id: number) => {
@@ -61,11 +63,12 @@ export const projectsApi = {
     }
   },
   getModules: async (id: number) => {
-    if (isClientMode()) return { data: localStore.getModules(id) };
+    const list = localStore.getModules(id);
+    if (isClientMode()) return { data: list };
     try {
       return await api.get(`/projects/${id}/modules`);
     } catch {
-      return { data: localStore.getModules(id) };
+      return { data: list };
     }
   },
   createModule: async (projectId: number, data: { name: string; description?: string }) => {
@@ -81,11 +84,13 @@ export const projectsApi = {
 // Modules
 export const modulesApi = {
   getAll: async (params?: { projectId?: number }) => {
-    if (isClientMode()) return { data: localStore.getModules(params?.projectId) };
+    const list = localStore.getModules(params?.projectId);
+    const wrapped = { data: list, total: list.length };
+    if (isClientMode()) return { data: wrapped };
     try {
       return await api.get('/modules', { params });
     } catch {
-      return { data: localStore.getModules(params?.projectId) };
+      return { data: wrapped };
     }
   },
   getById: async (id: number) => {
@@ -106,11 +111,12 @@ export const modulesApi = {
     }
   },
   getScenarios: async (id: number) => {
-    if (isClientMode()) return { data: localStore.getScenarios({ moduleId: id }) };
+    const list = localStore.getScenarios({ moduleId: id });
+    if (isClientMode()) return { data: list };
     try {
       return await api.get(`/modules/${id}/scenarios`);
     } catch {
-      return { data: localStore.getScenarios({ moduleId: id }) };
+      return { data: list };
     }
   },
 };
@@ -118,11 +124,13 @@ export const modulesApi = {
 // Scenarios
 export const scenariosApi = {
   getAll: async (params?: { moduleId?: number; status?: string; page?: number; limit?: number }) => {
-    if (isClientMode()) return { data: localStore.getScenarios(params) };
+    const list = localStore.getScenarios(params);
+    const wrapped = { data: list, total: list.length, pagination: { total: list.length, page: 1, limit: 100 } };
+    if (isClientMode()) return { data: wrapped };
     try {
       return await api.get('/scenarios', { params });
     } catch {
-      return { data: localStore.getScenarios(params) };
+      return { data: wrapped };
     }
   },
   getById: async (id: number) => {
@@ -182,11 +190,13 @@ export const scenariosApi = {
 // Test Cases
 export const testCasesApi = {
   getAll: async (params?: { scenarioId?: number; status?: string; page?: number; limit?: number }) => {
-    if (isClientMode()) return { data: localStore.getTestCases(params) };
+    const list = localStore.getTestCases(params);
+    const wrapped = { data: list, total: list.length, pagination: { total: list.length, page: 1, limit: 100 } };
+    if (isClientMode()) return { data: wrapped };
     try {
       return await api.get('/test-cases', { params });
     } catch {
-      return { data: localStore.getTestCases(params) };
+      return { data: wrapped };
     }
   },
   getById: async (id: number) => {

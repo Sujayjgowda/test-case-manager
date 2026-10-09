@@ -146,57 +146,64 @@ export default function ProjectDetailClient() {
             </form>
           )}
 
-          {modulesLoading ? (
-            <div className="text-center py-4 text-muted-foreground">Loading modules...</div>
-          ) : modules && modules.length > 0 ? (
-            <div className="space-y-3">
-              {modules.map((module: any) => (
-                <div
-                  key={module.id}
-                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-                      <Package className="w-5 h-5 text-green-600" />
-                    </div>
-                    <div>
-                      <h3 className="font-medium">{module.name}</h3>
-                      <p className="text-sm text-muted-foreground">
-                        {module._count?.scenarios || 0} scenarios
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Link href={`/scenarios?moduleId=${module.id}`}>
-                      <Button variant="ghost" size="sm">
-                        View Scenarios
-                        <ChevronRight className="w-4 h-4 ml-1" />
-                      </Button>
-                    </Link>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => deleteModuleMutation.mutate(module.id)}
+          {(() => {
+            const moduleList = Array.isArray(modules) ? modules : modules?.data || [];
+            if (modulesLoading) {
+              return <div className="text-center py-4 text-muted-foreground">Loading modules...</div>;
+            }
+            if (moduleList.length > 0) {
+              return (
+                <div className="space-y-3">
+                  {moduleList.map((module: any) => (
+                    <div
+                      key={module.id}
+                      className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 transition-colors"
                     >
-                      <Trash2 className="w-4 h-4 text-destructive" />
-                    </Button>
-                  </div>
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                          <Package className="w-5 h-5 text-green-600" />
+                        </div>
+                        <div>
+                          <h3 className="font-medium">{module.name}</h3>
+                          <p className="text-sm text-muted-foreground">
+                            {module._count?.scenarios || 0} scenarios
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Link href={`/scenarios?moduleId=${module.id}`}>
+                          <Button variant="ghost" size="sm">
+                            View Scenarios
+                            <ChevronRight className="w-4 h-4 ml-1" />
+                          </Button>
+                        </Link>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => deleteModuleMutation.mutate(module.id)}
+                        >
+                          <Trash2 className="w-4 h-4 text-destructive" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-8">
-              <Package className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-              <p className="text-muted-foreground">No modules yet</p>
-              <Button
-                variant="link"
-                onClick={() => setShowModuleForm(true)}
-                className="mt-2"
-              >
-                Create your first module
-              </Button>
-            </div>
-          )}
+              );
+            }
+            return (
+              <div className="text-center py-8">
+                <Package className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                <p className="text-muted-foreground">No modules yet</p>
+                <Button
+                  variant="link"
+                  onClick={() => setShowModuleForm(true)}
+                  className="mt-2"
+                >
+                  Create your first module
+                </Button>
+              </div>
+            );
+          })()}
         </CardContent>
       </Card>
     </div>

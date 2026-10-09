@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { projectsApi } from '@/lib/api-client';
+import { projectsApi, scenariosApi, testCasesApi } from '@/lib/api-client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -16,33 +16,48 @@ import {
 import Link from 'next/link';
 
 export default function DashboardPage() {
-  const { data: projects, isLoading } = useQuery({
+  const { data: projects, isLoading: projectsLoading } = useQuery({
     queryKey: ['projects'],
     queryFn: () => projectsApi.getAll().then((res) => res.data),
   });
 
+  const { data: scenarios } = useQuery({
+    queryKey: ['scenarios'],
+    queryFn: () => scenariosApi.getAll().then((res) => res.data),
+  });
+
+  const { data: testCases } = useQuery({
+    queryKey: ['test-cases'],
+    queryFn: () => testCasesApi.getAll().then((res) => res.data),
+  });
+
+  const projectList = Array.isArray(projects) ? projects : projects?.data || [];
+  const scenarioList = Array.isArray(scenarios) ? scenarios : scenarios?.data || [];
+  const testCaseList = Array.isArray(testCases) ? testCases : testCases?.data || [];
+  const aiGeneratedCount = testCaseList.filter((tc: any) => tc.aiGenerated).length;
+
   const stats = [
     {
       label: 'Total Projects',
-      value: projects?.pagination?.total || 0,
+      value: projectList.length,
       icon: FolderOpen,
       color: 'text-blue-500',
     },
     {
       label: 'Active Scenarios',
-      value: 0,
+      value: scenarioList.length,
       icon: ClipboardList,
       color: 'text-green-500',
     },
     {
       label: 'Test Cases',
-      value: 0,
+      value: testCaseList.length,
       icon: CheckSquare,
       color: 'text-purple-500',
     },
     {
       label: 'AI Generated',
-      value: 0,
+      value: aiGeneratedCount,
       icon: TrendingUp,
       color: 'text-orange-500',
     },
@@ -88,11 +103,11 @@ export default function DashboardPage() {
           <CardDescription>Your latest projects and their status</CardDescription>
         </CardHeader>
         <CardContent>
-          {isLoading ? (
+          {projectsLoading ? (
             <div className="text-center py-8 text-muted-foreground">Loading...</div>
-          ) : projects?.data && projects.data.length > 0 ? (
+          ) : projectList.length > 0 ? (
             <div className="space-y-4">
-              {projects.data.map((project: any) => (
+              {projectList.map((project: any) => (
                 <div
                   key={project.id}
                   className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 transition-colors"

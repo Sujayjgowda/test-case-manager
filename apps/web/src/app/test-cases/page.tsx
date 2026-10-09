@@ -79,9 +79,12 @@ export default function TestCasesPage() {
     }
   };
 
-  const filteredCases = testCases?.data?.filter((tc: any) =>
+  const rawCases = Array.isArray(testCases) ? testCases : testCases?.data || [];
+  const filteredCases = rawCases.filter((tc: any) =>
     tc.title.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const scenarioList = Array.isArray(scenarios) ? scenarios : scenarios?.data || [];
 
   return (
     <div className="space-y-6">
@@ -115,7 +118,7 @@ export default function TestCasesPage() {
                   required
                 >
                   <option value="">Select a scenario</option>
-                  {scenarios?.data?.map((s: any) => (
+                  {scenarioList.map((s: any) => (
                     <option key={s.id} value={s.id}>
                       {s.title}
                     </option>

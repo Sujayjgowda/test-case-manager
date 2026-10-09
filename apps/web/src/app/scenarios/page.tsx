@@ -140,9 +140,9 @@ function ScenariosContent() {
                     required
                   >
                     <option value="">Select a module</option>
-                    {modules?.data?.map((m: any) => (
+                    {(Array.isArray(modules) ? modules : modules?.data || []).map((m: any) => (
                       <option key={m.id} value={m.id}>
-                        {m.name}
+                        {m.name} {m.project ? `(${m.project.name})` : ''}
                       </option>
                     ))}
                   </select>
@@ -209,12 +209,15 @@ function ScenariosContent() {
         </Card>
       )}
 
-      <div className="grid gap-6">
-        {isLoading ? (
-          <div className="text-center py-8 text-muted-foreground">Loading...</div>
-        ) : scenarios?.data && scenarios.data.length > 0 ? (
-          scenarios.data.map((scenario: any) => (
-            <Card key={scenario.id} className="hover:shadow-md transition-shadow">
+      {(() => {
+        const scenarioList = Array.isArray(scenarios) ? scenarios : scenarios?.data || [];
+        return (
+          <div className="grid gap-6">
+            {isLoading ? (
+              <div className="text-center py-8 text-muted-foreground">Loading...</div>
+            ) : scenarioList.length > 0 ? (
+              scenarioList.map((scenario: any) => (
+                <Card key={scenario.id} className="hover:shadow-md transition-shadow">
               <CardHeader>
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
@@ -274,19 +277,21 @@ function ScenariosContent() {
               </CardContent>
             </Card>
           ))
-        ) : (
-          <Card>
-            <CardContent className="text-center py-12">
-              <ClipboardList className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-              <p className="text-muted-foreground mb-4">No scenarios yet</p>
-              <Button onClick={() => setShowCreateForm(true)}>
-                <Plus className="w-4 h-4 mr-2" />
-                Create your first scenario
-              </Button>
-            </CardContent>
-          </Card>
-        )}
-      </div>
+            ) : (
+              <Card>
+                <CardContent className="text-center py-12">
+                  <ClipboardList className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                  <p className="text-muted-foreground mb-4">No scenarios yet</p>
+                  <Button onClick={() => setShowCreateForm(true)}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Create your first scenario
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }

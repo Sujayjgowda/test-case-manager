@@ -3,7 +3,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { scenariosApi } from '@/lib/api-client';
-import { localStore } from '@/lib/local-store';
+import { localStore, Project, Scenario } from '@/lib/local-store';
+import { generateTestStepsAsync } from '@/lib/argus-lsmv-engine';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -19,7 +20,14 @@ import {
   Trash2,
   Plus,
   ChevronRight,
+  BookmarkPlus,
+  Settings,
+  CheckCircle2,
+  ExternalLink,
+  X,
+  Check,
 } from 'lucide-react';
+import Link from 'next/link';
 
 interface GeneratedStep {
   stepNumber: number;
@@ -48,43 +56,134 @@ export default function TestStepsGeneratorPage() {
   const [retryCountdown, setRetryCountdown] = useState<number | null>(null);
   const retryTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Available Data from Store
+  const [availableProjects, setAvailableProjects] = useState<Project[]>([]);
+  const [availableScenarios, setAvailableScenarios] = useState<Scenario[]>([]);
+
+  // Save Modal State
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [saveScenarioOption, setSaveScenarioOption] = useState<'existing' | 'new'>('existing');
+  const [saveSelectedProjectId, setSaveSelectedProjectId] = useState<number>(1);
+  const [saveSelectedScenarioId, setSaveSelectedScenarioId] = useState<number | undefined>();
+  const [saveNewScenarioTitle, setSaveNewScenarioTitle] = useState('');
+  const [saveTestCaseTitle, setSaveTestCaseTitle] = useState('');
+  const [savePriority, setSavePriority] = useState('high');
+  const [savedSuccessInfo, setSavedSuccessInfo] = useState<{
+    id: number;
+    title: string;
+    scenarioTitle: string;
+  } | null>(null);
+
+  // AI Configuration State
+  const [showAiSettingsModal, setShowAiSettingsModal] = useState(false);
+  const [aiProvider, setAiProvider] = useState<'builtin' | 'gemini' | 'openai' | 'groq'>('builtin');
+  const [aiApiKey, setAiApiKey] = useState('');
+  const [aiKeySavedNotice, setAiKeySavedNotice] = useState(false);
+
+  // Refresh available projects and scenarios from local store
+  const refreshStoreData = () => {
+    try {
+      const projs = localStore.getProjects();
+      const scens = localStore.getScenarios();
+      setAvailableProjects(projs);
+      setAvailableScenarios(scens);
+
+      if (projs.length > 0 && !saveSelectedProjectId) {
+        setSaveSelectedProjectId(projs[0].id);
+      }
+      if (scens.length > 0 && !saveSelectedScenarioId) {
+        setSaveSelectedScenarioId(scens[0].id);
+      }
+    } catch (e) {
+      console.warn('Failed to load local store data:', e);
+    }
+  };
+
+  useEffect(() => {
+    refreshStoreData();
+
+    // Load AI config from localStorage
+    try {
+      const stored = localStorage.getItem('tcm_ai_config');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed.provider) setAiProvider(parsed.provider);
+        if (parsed.apiKey) setAiApiKey(parsed.apiKey);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const saveAiConfig = () => {
+    try {
+      localStorage.setItem(
+        'tcm_ai_config',
+        JSON.stringify({
+          provider: aiProvider,
+          apiKey: aiApiKey.trim(),
+        })
+      );
+      setAiKeySavedNotice(true);
+      setTimeout(() => {
+        setAiKeySavedNotice(false);
+        setShowAiSettingsModal(false);
+      }, 900);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const generateMutation = useMutation({
     mutationFn: async () => {
-      // If we have a scenario ID, use the scenario generation endpoint
-      if (selectedScenarioId) {
-        const response = await scenariosApi.generateTestCases(selectedScenarioId, {
-          prompt: additionalInstructions || undefined,
-          options: {
-            includeNegativeCases: false,
-            includeEdgeCases: false,
-            numberOfCases: 1,
-          },
+      // Direct client-side AI Generation & Pharmacovigilance Calculation Engine
+      // This automatically uses the configured live LLM (Gemini/OpenAI) if an API key is saved,
+      // or executes the dynamic Pharmacovigilance Calculation Engine.
+      try {
+        const result = await generateTestStepsAsync({
+          scenarioTitle,
+          scenarioDescription,
+          preconditions,
+          expectedOutcome,
+          additionalInstructions,
+          environment,
+          apiKey: aiApiKey || undefined,
+          aiProvider,
         });
-        return response.data;
+
+        if (result && result.steps && result.steps.length > 0) {
+          return result;
+        }
+      } catch (err) {
+        console.warn('Client engine encountered error, attempting API fallback:', err);
       }
 
-      // Otherwise, call the direct AI generation endpoint
+      // Optional backend server fallback
       try {
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1'}/ai/generate-test-steps`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            scenarioTitle,
-            scenarioDescription,
-            preconditions,
-            expectedOutcome,
-            additionalInstructions,
-            environment,
-          }),
-        });
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1'}/ai/generate-test-steps`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              scenarioTitle,
+              scenarioDescription,
+              preconditions,
+              expectedOutcome,
+              additionalInstructions,
+              environment,
+            }),
+          }
+        );
 
         if (response.ok) {
           return await response.json();
         }
-      } catch (e) {
-        // Fall through to local generation
+      } catch {
+        // ignore
       }
 
+      // Guaranteed fallback
       return localStore.generateTestSteps({
         scenarioTitle,
         scenarioDescription,
@@ -94,9 +193,10 @@ export default function TestStepsGeneratorPage() {
         environment,
       });
     },
-    onSuccess: (data) => {
+    onSuccess: (data: any) => {
       setRetryCountdown(null);
-      // The endpoint returns { title, description, preConditions, postConditions, environment, steps }
+      setSavedSuccessInfo(null);
+
       if (data.steps && Array.isArray(data.steps)) {
         setGeneratedResult({
           title: data.title || scenarioTitle,
@@ -106,27 +206,26 @@ export default function TestStepsGeneratorPage() {
           environment: data.environment || environment,
           steps: data.steps,
         });
+        setSaveTestCaseTitle(data.title || scenarioTitle);
       } else if (data.testCases && data.testCases.length > 0) {
         setGeneratedResult({
           ...data.testCases[0],
           environment: data.environment || environment,
         });
+        setSaveTestCaseTitle(data.testCases[0].title || scenarioTitle);
       }
     },
     onError: (error: Error) => {
-      // Check for rate limit — parse seconds from message like "Please wait 57s and try again"
       const match = error.message.match(/(\d+)s/);
       if (match && error.message.toLowerCase().includes('rate limit')) {
         const seconds = parseInt(match[1]) + 2;
         setRetryCountdown(seconds);
-        // Start countdown
         if (retryTimerRef.current) clearInterval(retryTimerRef.current);
         retryTimerRef.current = setInterval(() => {
           setRetryCountdown((prev) => {
             if (prev === null || prev <= 1) {
               clearInterval(retryTimerRef.current!);
               retryTimerRef.current = null;
-              // Auto-retry
               generateMutation.mutate();
               return null;
             }
@@ -143,20 +242,21 @@ export default function TestStepsGeneratorPage() {
 
   const handleCopySteps = () => {
     if (!generatedResult) return;
-
     const text = generatedResult.steps
       .map((step) => `Step ${step.stepNumber}: ${step.description}\nExpected: ${step.expectedResult}`)
       .join('\n\n');
-
     navigator.clipboard.writeText(text);
   };
 
   const handleExport = () => {
     if (!generatedResult) return;
-
     const csv = [
       ['Step Number', 'Description', 'Expected Result'],
-      ...generatedResult.steps.map((s) => [s.stepNumber, `"${s.description.replace(/"/g, '""')}"`, `"${s.expectedResult.replace(/"/g, '""')}"`]),
+      ...generatedResult.steps.map((s) => [
+        s.stepNumber,
+        `"${s.description.replace(/"/g, '""')}"`,
+        `"${s.expectedResult.replace(/"/g, '""')}"`,
+      ]),
     ]
       .map((row) => row.join(','))
       .join('\n');
@@ -188,10 +288,14 @@ ${generatedResult.preConditions}
 ${generatedResult.postConditions}
 
 ## Detailed Pharmacovigilance Test Steps (${isLsmv ? 'LSMV Specific' : 'Oracle Argus Safety Specific'})
-${generatedResult.steps.map((s) => `### Step ${s.stepNumber}
+${generatedResult.steps
+  .map(
+    (s) => `### Step ${s.stepNumber}
 - **Action:** ${s.description}
 - **Expected Result:** ${s.expectedResult}
-`).join('\n')}
+`
+  )
+  .join('\n')}
 `;
     const blob = new Blob([md], { type: 'text/markdown' });
     const url = URL.createObjectURL(blob);
@@ -201,18 +305,124 @@ ${generatedResult.steps.map((s) => `### Step ${s.stepNumber}
     a.click();
   };
 
+  const handleSaveToProject = () => {
+    if (!generatedResult) return;
+
+    try {
+      const saved = localStore.saveGeneratedTestCase({
+        scenarioId: saveScenarioOption === 'existing' ? saveSelectedScenarioId : undefined,
+        newScenarioTitle:
+          saveScenarioOption === 'new'
+            ? saveNewScenarioTitle || generatedResult.title
+            : undefined,
+        title: saveTestCaseTitle || generatedResult.title,
+        description: generatedResult.description,
+        preConditions: generatedResult.preConditions,
+        postConditions: generatedResult.postConditions,
+        priority: savePriority,
+        steps: generatedResult.steps,
+        environment: generatedResult.environment || environment,
+      });
+
+      // Find scenario title for confirmation banner
+      let targetScenarioName = 'Selected Scenario';
+      if (saveScenarioOption === 'existing' && saveSelectedScenarioId) {
+        const sc = availableScenarios.find((s) => s.id === saveSelectedScenarioId);
+        if (sc) targetScenarioName = sc.title;
+      } else if (saveScenarioOption === 'new') {
+        targetScenarioName = saveNewScenarioTitle || generatedResult.title;
+      }
+
+      setSavedSuccessInfo({
+        id: saved.id,
+        title: saved.title,
+        scenarioTitle: targetScenarioName,
+      });
+
+      setShowSaveModal(false);
+      refreshStoreData();
+    } catch (err: any) {
+      alert(`Failed to save test case: ${err.message}`);
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">AI Test Steps Generator</h1>
-        <p className="text-muted-foreground mt-1">
-          Generate detailed, non-clubbed test steps strictly isolated for Oracle Argus Safety or LSMV
-        </p>
+      {/* Top Header Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">AI Test Steps Generator</h1>
+          <p className="text-muted-foreground mt-1 text-sm">
+            Dynamically synthesize and calculate isolated test steps for Oracle Argus Safety or LSMV
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          {aiProvider === 'builtin' ? (
+            <Badge
+              variant="outline"
+              className="px-3 py-1 bg-primary/10 text-primary border-primary/30 text-xs flex items-center gap-1.5"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-primary" />
+              Pharmacovigilance Dynamic Engine
+            </Badge>
+          ) : (
+            <Badge variant="success" className="px-3 py-1 text-xs flex items-center gap-1.5 shadow-sm">
+              <Zap className="w-3.5 h-3.5" />
+              Live AI ({aiProvider.toUpperCase()})
+            </Badge>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowAiSettingsModal(true)}
+            className="flex items-center gap-1.5 shadow-sm"
+          >
+            <Settings className="w-4 h-4" />
+            AI Settings
+          </Button>
+        </div>
       </div>
+
+      {/* Success Notification Banner */}
+      {savedSuccessInfo && (
+        <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-lg flex items-center justify-between flex-wrap gap-3 shadow-sm animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-center gap-3">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+            <div>
+              <p className="text-sm font-bold text-emerald-900">
+                Test Case Saved Successfully!
+              </p>
+              <p className="text-xs text-emerald-700">
+                &ldquo;{savedSuccessInfo.title}&rdquo; is now stored under &ldquo;{savedSuccessInfo.scenarioTitle}&rdquo;.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Link href={`/test-cases/${savedSuccessInfo.id}`}>
+              <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs">
+                View Test Case #{savedSuccessInfo.id} <ExternalLink className="w-3.5 h-3.5 ml-1.5" />
+              </Button>
+            </Link>
+            <Link href="/test-cases">
+              <Button variant="outline" size="sm" className="text-xs">
+                All Test Cases
+              </Button>
+            </Link>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setSavedSuccessInfo(null)}
+              className="text-emerald-700 hover:text-emerald-900 h-8 w-8"
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Input Section */}
-        <Card>
+        <Card className="shadow-sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Zap className="w-5 h-5 text-primary" />
@@ -225,12 +435,15 @@ ${generatedResult.steps.map((s) => `### Step ${s.stepNumber}
           <CardContent className="space-y-4">
             {/* Environment Dropdown Selector */}
             <div className="p-3.5 border-2 border-primary/20 bg-primary/5 rounded-lg space-y-2">
-              <label htmlFor="environment-select" className="block text-sm font-semibold text-foreground flex items-center justify-between">
+              <label
+                htmlFor="environment-select"
+                className="block text-sm font-semibold text-foreground flex items-center justify-between"
+              >
                 <span className="flex items-center gap-1.5">
                   Target Application Environment <span className="text-red-500">*</span>
                 </span>
-                <span className="text-xs font-medium text-primary uppercase tracking-wider">
-                  Isolated Test Steps
+                <span className="text-xs font-semibold text-primary uppercase tracking-wider">
+                  Isolated Steps
                 </span>
               </label>
               <select
@@ -240,7 +453,9 @@ ${generatedResult.steps.map((s) => `### Step ${s.stepNumber}
                 className="w-full h-11 px-3 py-2 bg-background border-2 border-primary/40 rounded-md text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all cursor-pointer"
               >
                 <option value="argus">🛡️ Oracle Argus Safety (Case Book-in, MedDRA, Case Lock, E2B-R3)</option>
-                <option value="lsmv">📖 LSMV (Literature Screening & Medical Valuation, ICSR Triage, PDF Review)</option>
+                <option value="lsmv">
+                  📖 LSMV (Literature Screening & Medical Valuation, ICSR Triage, PDF Review)
+                </option>
               </select>
               <p className="text-xs text-muted-foreground leading-relaxed">
                 {environment === 'argus' ? (
@@ -254,6 +469,46 @@ ${generatedResult.steps.map((s) => `### Step ${s.stepNumber}
                 )}
               </p>
             </div>
+
+            {/* Optional: Load from Saved Scenario */}
+            {availableScenarios.length > 0 && (
+              <div className="p-2.5 bg-muted/40 border rounded-lg space-y-1.5">
+                <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  Load Details from Saved Scenario (Optional)
+                </label>
+                <select
+                  value={selectedScenarioId || ''}
+                  onChange={(e) => {
+                    const id = parseInt(e.target.value);
+                    if (id) {
+                      const sc = availableScenarios.find((s) => s.id === id);
+                      if (sc) {
+                        setSelectedScenarioId(sc.id);
+                        setScenarioTitle(sc.title);
+                        setScenarioDescription(sc.description || '');
+                        setPreconditions(sc.preconditions || '');
+                        setExpectedOutcome(sc.expectedOutcome || '');
+                        const isLsmv =
+                          sc.title.toLowerCase().includes('lsmv') ||
+                          (sc.description || '').toLowerCase().includes('lsmv') ||
+                          sc.title.toLowerCase().includes('literature');
+                        setEnvironment(isLsmv ? 'lsmv' : 'argus');
+                      }
+                    } else {
+                      setSelectedScenarioId(undefined);
+                    }
+                  }}
+                  className="w-full h-9 px-2.5 py-1 bg-background border rounded-md text-xs font-medium focus:ring-1 focus:ring-primary cursor-pointer"
+                >
+                  <option value="">-- Choose an existing saved scenario to populate --</option>
+                  {availableScenarios.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.title} ({s.module?.project?.name || 'Project'})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <div>
               <label className="block text-sm font-medium mb-2">
@@ -271,15 +526,13 @@ ${generatedResult.steps.map((s) => `### Step ${s.stepNumber}
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-2">
-                Scenario Description
-              </label>
+              <label className="block text-sm font-medium mb-2">Scenario Description</label>
               <Textarea
                 value={scenarioDescription}
                 onChange={(e) => setScenarioDescription(e.target.value)}
                 placeholder={
                   environment === 'argus'
-                    ? 'Describe Argus Safety case intake, MedDRA coding, case lock, or E2B reporting...'
+                    ? 'Describe Argus Safety case intake, suspect drug, reaction, MedDRA coding, case lock, or E2B reporting...'
                     : 'Describe LSMV literature search feed triage, duplicate screening, PDF review, or export...'
                 }
                 rows={3}
@@ -287,9 +540,7 @@ ${generatedResult.steps.map((s) => `### Step ${s.stepNumber}
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-2">
-                Preconditions
-              </label>
+              <label className="block text-sm font-medium mb-2">Preconditions</label>
               <Textarea
                 value={preconditions}
                 onChange={(e) => setPreconditions(e.target.value)}
@@ -303,9 +554,7 @@ ${generatedResult.steps.map((s) => `### Step ${s.stepNumber}
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-2">
-                Expected Outcome
-              </label>
+              <label className="block text-sm font-medium mb-2">Expected Outcome</label>
               <Textarea
                 value={expectedOutcome}
                 onChange={(e) => setExpectedOutcome(e.target.value)}
@@ -319,21 +568,19 @@ ${generatedResult.steps.map((s) => `### Step ${s.stepNumber}
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-2">
-                Additional Instructions for AI
-              </label>
+              <label className="block text-sm font-medium mb-2">Additional Instructions for AI</label>
               <Textarea
                 value={additionalInstructions}
                 onChange={(e) => setAdditionalInstructions(e.target.value)}
-                placeholder="e.g., Include 10-15 detailed steps, Focus on data entry validation, Include negative error testing..."
+                placeholder="e.g., Include specific steps for anaphylaxis reaction, check WHO causality matrix, verify 21 CFR Part 11 password prompt..."
                 rows={2}
               />
             </div>
 
             <Button
               onClick={handleGenerate}
-              disabled={generateMutation.isPending || !scenarioTitle}
-              className="w-full"
+              disabled={generateMutation.isPending || !scenarioTitle.trim()}
+              className="w-full text-base font-semibold shadow-sm"
               size="lg"
             >
               {generateMutation.isPending ? (
@@ -350,95 +597,117 @@ ${generatedResult.steps.map((s) => `### Step ${s.stepNumber}
             </Button>
 
             <p className="text-xs text-muted-foreground text-center">
-              Dedicated test steps will be prepared strictly for {environment === 'argus' ? 'Oracle Argus Safety' : 'LSMV'}
+              Dedicated test steps will be prepared strictly for{' '}
+              <span className="font-semibold text-foreground">
+                {environment === 'argus' ? 'Oracle Argus Safety' : 'LSMV'}
+              </span>
             </p>
           </CardContent>
         </Card>
 
         {/* Output Section */}
-        <Card>
+        <Card className="shadow-sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <CheckSquare className="w-5 h-5 text-green-600" />
+              <CheckSquare className="w-5 h-5 text-emerald-600" />
               Generated Test Steps
             </CardTitle>
             <CardDescription>
-              AI-generated test steps with expected results
+              Dynamically synthesized test steps with specific actions and expected results
             </CardDescription>
           </CardHeader>
           <CardContent>
             {generateMutation.isPending ? (
-              <div className="flex flex-col items-center justify-center py-12">
+              <div className="flex flex-col items-center justify-center py-16">
                 <Loader2 className="w-12 h-12 animate-spin text-primary mb-4" />
-                <p className="text-muted-foreground">
-                  AI is generating detailed test steps...
+                <p className="text-base font-medium text-foreground">
+                  AI is calculating tailored test steps...
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Synthesizing pharmacovigilance workflows for{' '}
+                  {environment === 'argus' ? 'Oracle Argus Safety' : 'LSMV'}
                 </p>
               </div>
             ) : generateMutation.isError ? (
               <div className="flex flex-col items-center justify-center py-12">
                 <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-4">
-                  <span className="text-red-600 text-2xl">✕</span>
+                  <span className="text-red-600 text-2xl font-bold">✕</span>
                 </div>
-                <p className="text-red-600 font-medium mb-2">Generation Failed</p>
+                <p className="text-red-600 font-semibold mb-2">Generation Failed</p>
                 <p className="text-sm text-muted-foreground text-center max-w-xs">
-                  {(generateMutation.error as Error)?.message || 'An unexpected error occurred. Please check your API configuration.'}
+                  {(generateMutation.error as Error)?.message ||
+                    'An unexpected error occurred during generation.'}
                 </p>
               </div>
             ) : generatedResult ? (
               <div className="space-y-4">
-                <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b">
                   <div className="flex items-center gap-2">
-                    <Badge variant="success">
+                    <Badge variant="success" className="font-semibold">
                       {generatedResult.steps.length} Steps Generated
                     </Badge>
                     {generatedResult.environment === 'lsmv' ? (
                       <span className="inline-flex items-center rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800 ring-1 ring-inset ring-emerald-600/20">
-                        📖 LSMV Application Validated
+                        📖 LSMV Isolated
                       </span>
                     ) : (
                       <span className="inline-flex items-center rounded-md bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-800 ring-1 ring-inset ring-blue-600/20">
-                        🛡️ Oracle Argus Safety Validated
+                        🛡️ Oracle Argus Isolated
                       </span>
                     )}
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium shadow-sm"
+                      onClick={() => {
+                        setSaveTestCaseTitle(generatedResult.title);
+                        setShowSaveModal(true);
+                      }}
+                    >
+                      <BookmarkPlus className="w-4 h-4 mr-1.5" />
+                      Save as Test Case
+                    </Button>
                     <Button variant="outline" size="sm" onClick={handleCopySteps}>
-                      <Copy className="w-4 h-4 mr-2" />
+                      <Copy className="w-4 h-4 mr-1.5" />
                       Copy
                     </Button>
                     <Button variant="outline" size="sm" onClick={handleExportMarkdown}>
-                      <Download className="w-4 h-4 mr-2" />
+                      <Download className="w-4 h-4 mr-1.5" />
                       Markdown
                     </Button>
                     <Button variant="outline" size="sm" onClick={handleExport}>
-                      <Download className="w-4 h-4 mr-2" />
+                      <Download className="w-4 h-4 mr-1.5" />
                       CSV
                     </Button>
                   </div>
                 </div>
 
-                <div className="space-y-3 max-h-[600px] overflow-y-auto">
+                <div className="space-y-3 max-h-[560px] overflow-y-auto pr-1">
                   {generatedResult.steps.map((step) => (
                     <div
                       key={step.stepNumber}
-                      className="p-4 border rounded-lg hover:shadow-md transition-shadow"
+                      className="p-3.5 border rounded-lg hover:shadow-md transition-shadow bg-card"
                     >
                       <div className="flex items-start gap-3">
-                        <div className="w-8 h-8 bg-primary text-white rounded-full flex items-center justify-center font-semibold text-sm shrink-0">
+                        <div className="w-7 h-7 bg-primary text-white rounded-full flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
                           {step.stepNumber}
                         </div>
                         <div className="flex-1 space-y-2">
                           <div>
-                            <span className="text-xs font-medium text-muted-foreground uppercase">
+                            <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
                               Action
                             </span>
-                            <p className="text-sm mt-1">{step.description}</p>
+                            <p className="text-sm font-medium mt-0.5 text-foreground">
+                              {step.description}
+                            </p>
                           </div>
                           <div>
-                            <span className="text-xs font-medium text-muted-foreground uppercase">
+                            <span className="text-[11px] font-bold text-emerald-800 uppercase tracking-wider">
                               Expected Result
                             </span>
-                            <p className="text-sm mt-1 text-green-700 bg-green-50 p-2 rounded">
+                            <p className="text-xs mt-0.5 text-emerald-800 bg-emerald-50/80 border border-emerald-200/60 p-2 rounded">
                               {step.expectedResult}
                             </p>
                           </div>
@@ -448,40 +717,36 @@ ${generatedResult.steps.map((s) => `### Step ${s.stepNumber}
                   ))}
                 </div>
 
-                <div className="pt-4 border-t">
-                  <h4 className="text-sm font-medium mb-2">Test Case Info</h4>
-                  <div className="space-y-2 text-sm">
+                <div className="pt-3 border-t">
+                  <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">
+                    Case Metadata
+                  </h4>
+                  <div className="space-y-1.5 text-xs">
                     <div>
-                      <span className="text-muted-foreground">Title:</span>{' '}
-                      <span className="font-medium">{generatedResult.title}</span>
+                      <span className="text-muted-foreground font-medium">Title:</span>{' '}
+                      <span className="font-semibold text-foreground">{generatedResult.title}</span>
                     </div>
                     {generatedResult.preConditions && (
                       <div>
-                        <span className="text-muted-foreground">Preconditions:</span>{' '}
-                        <p className="text-muted-foreground mt-1">
-                          {generatedResult.preConditions}
-                        </p>
+                        <span className="text-muted-foreground font-medium">Preconditions:</span>{' '}
+                        <span className="text-muted-foreground">{generatedResult.preConditions}</span>
                       </div>
                     )}
                     {generatedResult.postConditions && (
                       <div>
-                        <span className="text-muted-foreground">
-                          Post-conditions:
-                        </span>{' '}
-                        <p className="text-muted-foreground mt-1">
-                          {generatedResult.postConditions}
-                        </p>
+                        <span className="text-muted-foreground font-medium">Expected Outcome:</span>{' '}
+                        <span className="text-muted-foreground">{generatedResult.postConditions}</span>
                       </div>
                     )}
                   </div>
                 </div>
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                 <CheckSquare className="w-12 h-12 mb-4 opacity-20" />
-                <p>Enter your scenario details and click generate</p>
-                <p className="text-sm mt-2">
-                  Test steps will appear here
+                <p className="text-sm font-medium">Enter your scenario details and click generate</p>
+                <p className="text-xs mt-1 text-muted-foreground">
+                  Steps will be synthesized specifically for your scenario
                 </p>
               </div>
             )}
@@ -490,7 +755,7 @@ ${generatedResult.steps.map((s) => `### Step ${s.stepNumber}
       </div>
 
       {/* Quick Templates */}
-      <Card>
+      <Card className="shadow-sm">
         <CardHeader>
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
@@ -820,6 +1085,235 @@ ${generatedResult.steps.map((s) => `### Step ${s.stepNumber}
           )}
         </CardContent>
       </Card>
+
+      {/* Save as Test Case Modal */}
+      {showSaveModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-background rounded-xl border max-w-lg w-full shadow-2xl p-6 space-y-5 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b">
+              <div className="flex items-center gap-2">
+                <BookmarkPlus className="w-5 h-5 text-emerald-600" />
+                <h3 className="text-lg font-bold">Save as Test Case</h3>
+              </div>
+              <button
+                onClick={() => setShowSaveModal(false)}
+                className="text-muted-foreground hover:text-foreground p-1 rounded-md"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1.5">
+                  Save Destination
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSaveScenarioOption('existing')}
+                    className={`p-2.5 rounded-lg border text-xs font-semibold text-center transition-all ${
+                      saveScenarioOption === 'existing'
+                        ? 'bg-primary/10 border-primary text-primary'
+                        : 'border-border text-muted-foreground hover:bg-muted'
+                    }`}
+                  >
+                    Add to Existing Scenario
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSaveScenarioOption('new')}
+                    className={`p-2.5 rounded-lg border text-xs font-semibold text-center transition-all ${
+                      saveScenarioOption === 'new'
+                        ? 'bg-primary/10 border-primary text-primary'
+                        : 'border-border text-muted-foreground hover:bg-muted'
+                    }`}
+                  >
+                    Create New Scenario
+                  </button>
+                </div>
+              </div>
+
+              {saveScenarioOption === 'existing' ? (
+                <div>
+                  <label className="block text-xs font-semibold mb-1">
+                    Select Target Scenario <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={saveSelectedScenarioId || ''}
+                    onChange={(e) => setSaveSelectedScenarioId(parseInt(e.target.value) || undefined)}
+                    className="w-full h-10 px-3 py-2 bg-background border rounded-md text-sm font-medium focus:ring-2 focus:ring-primary"
+                  >
+                    <option value="">-- Choose Scenario --</option>
+                    {availableScenarios.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.title} ({s.module?.project?.name || 'Project'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold mb-1">
+                      Project <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={saveSelectedProjectId}
+                      onChange={(e) => setSaveSelectedProjectId(parseInt(e.target.value))}
+                      className="w-full h-10 px-3 py-2 bg-background border rounded-md text-sm font-medium focus:ring-2 focus:ring-primary"
+                    >
+                      {availableProjects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} ({p.key})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold mb-1">
+                      New Scenario Title <span className="text-red-500">*</span>
+                    </label>
+                    <Input
+                      value={saveNewScenarioTitle}
+                      onChange={(e) => setSaveNewScenarioTitle(e.target.value)}
+                      placeholder="e.g., Argus Spontaneous Ingestion Flow"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold mb-1">
+                  Test Case Title <span className="text-red-500">*</span>
+                </label>
+                <Input
+                  value={saveTestCaseTitle}
+                  onChange={(e) => setSaveTestCaseTitle(e.target.value)}
+                  placeholder="Test Case Name"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold mb-1">Priority</label>
+                <select
+                  value={savePriority}
+                  onChange={(e) => setSavePriority(e.target.value)}
+                  className="w-full h-10 px-3 py-2 bg-background border rounded-md text-sm font-medium focus:ring-2 focus:ring-primary"
+                >
+                  <option value="high">High</option>
+                  <option value="critical">Critical</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                </select>
+              </div>
+
+              <div className="p-3 bg-muted/40 rounded-lg text-xs text-muted-foreground">
+                <span className="font-semibold text-foreground">Summary:</span> Will save{' '}
+                <strong className="text-primary">{generatedResult?.steps.length || 0}</strong>{' '}
+                steps with preconditions and postconditions.
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t">
+              <Button variant="outline" onClick={() => setShowSaveModal(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSaveToProject}
+                disabled={
+                  !saveTestCaseTitle.trim() ||
+                  (saveScenarioOption === 'existing' && !saveSelectedScenarioId) ||
+                  (saveScenarioOption === 'new' && !saveNewScenarioTitle.trim())
+                }
+                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              >
+                <Check className="w-4 h-4 mr-1.5" />
+                Confirm & Save
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI Model Settings Modal */}
+      {showAiSettingsModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-background rounded-xl border max-w-md w-full shadow-2xl p-6 space-y-5 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b">
+              <div className="flex items-center gap-2">
+                <Settings className="w-5 h-5 text-primary" />
+                <h3 className="text-lg font-bold">AI Engine Configuration</h3>
+              </div>
+              <button
+                onClick={() => setShowAiSettingsModal(false)}
+                className="text-muted-foreground hover:text-foreground p-1 rounded-md"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1.5">
+                  AI Model Provider
+                </label>
+                <select
+                  value={aiProvider}
+                  onChange={(e) =>
+                    setAiProvider(e.target.value as 'builtin' | 'gemini' | 'openai' | 'groq')
+                  }
+                  className="w-full h-10 px-3 py-2 bg-background border rounded-md text-sm font-medium focus:ring-2 focus:ring-primary"
+                >
+                  <option value="builtin">
+                    ⚡ Built-in Pharmacovigilance Dynamic AI (Instant, No API Key Required)
+                  </option>
+                  <option value="gemini">🤖 Google Gemini (Gemini 2.0 Flash / 1.5 Flash)</option>
+                  <option value="openai">🧠 OpenAI (GPT-4o-mini)</option>
+                  <option value="groq">⚡ Groq (Llama 3.3 70B Versatile)</option>
+                </select>
+                <p className="text-[11px] text-muted-foreground mt-1.5 leading-relaxed">
+                  {aiProvider === 'builtin'
+                    ? 'The Built-in engine uses clinical algorithms tailored for Oracle Argus Safety & LSMV without requiring external API keys.'
+                    : `Provide your API key to enable live generation using cloud AI directly in the browser.`}
+                </p>
+              </div>
+
+              {aiProvider !== 'builtin' && (
+                <div>
+                  <label className="block text-xs font-semibold mb-1">
+                    {aiProvider.toUpperCase()} API Key <span className="text-red-500">*</span>
+                  </label>
+                  <Input
+                    type="password"
+                    value={aiApiKey}
+                    onChange={(e) => setAiApiKey(e.target.value)}
+                    placeholder={`Paste your ${aiProvider.toUpperCase()} API Key here...`}
+                  />
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Keys are stored securely in your browser&apos;s localStorage and are never sent to third-party tracking servers.
+                  </p>
+                </div>
+              )}
+
+              {aiKeySavedNotice && (
+                <div className="p-2.5 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-md text-xs font-semibold flex items-center gap-2">
+                  <Check className="w-4 h-4 text-emerald-600" />
+                  AI Settings Saved Successfully!
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t">
+              <Button variant="outline" onClick={() => setShowAiSettingsModal(false)}>
+                Cancel
+              </Button>
+              <Button onClick={saveAiConfig}>Save Settings</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -840,7 +1334,7 @@ function TemplateCard({
   return (
     <div
       onClick={onClick}
-      className="p-4 border rounded-lg cursor-pointer hover:shadow-lg hover:border-primary transition-all flex flex-col justify-between group"
+      className="p-4 border rounded-lg cursor-pointer hover:shadow-lg hover:border-primary transition-all flex flex-col justify-between group bg-card"
     >
       <div>
         <div className="flex items-center justify-between gap-2 mb-2">
@@ -869,4 +1363,3 @@ function TemplateCard({
     </div>
   );
 }
-

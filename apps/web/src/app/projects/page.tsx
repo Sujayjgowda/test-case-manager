@@ -108,69 +108,74 @@ export default function ProjectsPage() {
         </Card>
       )}
 
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        {isLoading ? (
-          <div className="col-span-full text-center py-8 text-muted-foreground">Loading...</div>
-        ) : projects?.data && projects.data.length > 0 ? (
-          projects.data.map((project: any) => (
-            <Card key={project.id} className="hover:shadow-lg transition-shadow">
-              <CardHeader>
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
-                      <FolderOpen className="w-6 h-6 text-primary" />
+      {(() => {
+        const projectList = Array.isArray(projects) ? projects : projects?.data || [];
+        return (
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {isLoading ? (
+              <div className="col-span-full text-center py-8 text-muted-foreground">Loading...</div>
+            ) : projectList.length > 0 ? (
+              projectList.map((project: any) => (
+                <Card key={project.id} className="hover:shadow-lg transition-shadow">
+                  <CardHeader>
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
+                          <FolderOpen className="w-6 h-6 text-primary" />
+                        </div>
+                        <div>
+                          <CardTitle className="text-lg">{project.name}</CardTitle>
+                          <CardDescription className="text-xs">{project.key}</CardDescription>
+                        </div>
+                      </div>
+                      <Badge
+                        variant={
+                          project.status === 'active'
+                            ? 'success'
+                            : project.status === 'archived'
+                            ? 'secondary'
+                            : 'outline'
+                        }
+                      >
+                        {project.status}
+                      </Badge>
                     </div>
-                    <div>
-                      <CardTitle className="text-lg">{project.name}</CardTitle>
-                      <CardDescription className="text-xs">{project.key}</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {project.description && (
+                      <p className="text-sm text-muted-foreground mb-4">{project.description}</p>
+                    )}
+                    <div className="flex items-center justify-between">
+                      <Link href={`/projects/${project.id}`}>
+                        <Button variant="outline" size="sm">
+                          View Details
+                          <ExternalLink className="w-3 h-3 ml-2" />
+                        </Button>
+                      </Link>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => deleteMutation.mutate(project.id)}
+                      >
+                        <Trash2 className="w-4 h-4 text-destructive" />
+                      </Button>
                     </div>
-                  </div>
-                  <Badge
-                    variant={
-                      project.status === 'active'
-                        ? 'success'
-                        : project.status === 'archived'
-                        ? 'secondary'
-                        : 'outline'
-                    }
-                  >
-                    {project.status}
-                  </Badge>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {project.description && (
-                  <p className="text-sm text-muted-foreground mb-4">{project.description}</p>
-                )}
-                <div className="flex items-center justify-between">
-                  <Link href={`/projects/${project.id}`}>
-                    <Button variant="outline" size="sm">
-                      View Details
-                      <ExternalLink className="w-3 h-3 ml-2" />
-                    </Button>
-                  </Link>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => deleteMutation.mutate(project.id)}
-                  >
-                    <Trash2 className="w-4 h-4 text-destructive" />
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))
-        ) : (
-          <div className="col-span-full text-center py-12">
-            <FolderOpen className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-            <p className="text-muted-foreground mb-4">No projects yet</p>
-            <Button onClick={() => setShowCreateForm(true)}>
-              <Plus className="w-4 h-4 mr-2" />
-              Create your first project
-            </Button>
+                  </CardContent>
+                </Card>
+              ))
+            ) : (
+              <div className="col-span-full text-center py-12">
+                <FolderOpen className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                <p className="text-muted-foreground mb-4">No projects yet</p>
+                <Button onClick={() => setShowCreateForm(true)}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Create your first project
+                </Button>
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        );
+      })()}
     </div>
   );
 }

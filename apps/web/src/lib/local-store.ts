@@ -3,7 +3,7 @@ import { generateArgusLsmvTestSteps, ScenarioInput, TargetEnvironment } from './
 
 const STORAGE_KEY = 'tcm_local_projects';
 
-interface Project {
+export interface Project {
   id: number;
   name: string;
   key: string;
@@ -13,7 +13,7 @@ interface Project {
   _count?: { modules: number };
 }
 
-interface Module {
+export interface Module {
   id: number;
   projectId: number;
   name: string;
@@ -24,7 +24,7 @@ interface Module {
   _count?: { scenarios: number };
 }
 
-interface Scenario {
+export interface Scenario {
   id: number;
   moduleId: number;
   title: string;
@@ -38,7 +38,7 @@ interface Scenario {
   _count?: { testCases: number };
 }
 
-interface TestStep {
+export interface TestStep {
   id: number;
   testCaseId: number;
   stepNumber: number;
@@ -46,7 +46,7 @@ interface TestStep {
   expectedResult: string;
 }
 
-interface TestCase {
+export interface TestCase {
   id: number;
   scenarioId: number;
   title: string;
@@ -67,11 +67,123 @@ function loadProjects(): Project[] {
   }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
+    let projects: Project[] = [];
     if (!raw) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(initialProjects));
-      return initialProjects as any;
+      projects = initialProjects as any;
+    } else {
+      projects = JSON.parse(raw);
+      if (!Array.isArray(projects) || projects.length === 0) {
+        projects = initialProjects as any;
+      }
     }
-    return JSON.parse(raw);
+
+    // Ensure Oracle Argus Safety is present
+    const hasArgus = projects.some((p) => p.name.toLowerCase().includes('argus'));
+    if (!hasArgus) {
+      const argusFromInit = (initialProjects as any[]).find((p) => p.name.toLowerCase().includes('argus'));
+      if (argusFromInit) {
+        projects.push(argusFromInit);
+      }
+    }
+
+    // Ensure LSMV project is present
+    const hasLsmv = projects.some((p) => p.name.toLowerCase().includes('lsmv'));
+    if (!hasLsmv) {
+      const maxId = Math.max(...projects.map((p) => p.id), 0);
+      const lsmvProject: Project = {
+        id: maxId + 1,
+        name: 'LSMV (Literature Screening & Medical Valuation)',
+        key: 'LSMV',
+        description: 'Pharmacovigilance literature intake, triage, duplicate screening, PDF review, and safety database export',
+        status: 'active',
+        modules: [
+          {
+            id: 201,
+            projectId: maxId + 1,
+            name: 'Literature Intake & Search Feeds',
+            description: 'Automated weekly PubMed/Embase feed ingestion and screening worklists',
+            orderIndex: 0,
+            scenarios: [
+              {
+                id: 301,
+                moduleId: 201,
+                title: 'LSMV Automated Search Feed Ingestion from PubMed & Embase',
+                description: 'Ingest weekly bibliographic query outputs and allocate worklists',
+                priority: 'high',
+                preconditions: 'Literature feed connector active with defined search strings',
+                expectedOutcome: 'Citations loaded into triage worklist with metadata and abstract',
+                status: 'draft',
+                testCases: [],
+              },
+            ],
+          },
+          {
+            id: 202,
+            projectId: maxId + 1,
+            name: '4-Criteria ICSR Triage',
+            description: 'Screen title and abstract against minimum 4 ICSR criteria',
+            orderIndex: 1,
+            scenarios: [
+              {
+                id: 302,
+                moduleId: 202,
+                title: '4-Criteria ICSR Triage Verification for Spontaneous Literature Report',
+                description: 'Evaluate Identifiable Reporter, Patient, Suspect Product, and Adverse Event in article text',
+                priority: 'high',
+                preconditions: 'Citation loaded in screener worklist',
+                expectedOutcome: 'All 4 criteria evaluated and flagged as Potential ICSR',
+                status: 'draft',
+                testCases: [],
+              },
+            ],
+          },
+          {
+            id: 203,
+            projectId: maxId + 1,
+            name: 'Medical Valuation & Special Situations',
+            description: 'Physician assessment of off-label use, pregnancy, and lack of efficacy',
+            orderIndex: 2,
+            scenarios: [
+              {
+                id: 303,
+                moduleId: 203,
+                title: 'Medical Valuation of Off-Label and Special Situations Literature Cases',
+                description: 'Physician clinical evaluation and benefit-risk documentation',
+                priority: 'medium',
+                preconditions: 'Article triaged by primary screener with special situation flag',
+                expectedOutcome: 'Clinical rationale documented and signed off by Medical Evaluator',
+                status: 'draft',
+                testCases: [],
+              },
+            ],
+          },
+          {
+            id: 204,
+            projectId: maxId + 1,
+            name: 'Safety Database Export & Argus Intake',
+            description: 'QC verification and downstream export to Oracle Argus Safety intake queue',
+            orderIndex: 3,
+            scenarios: [
+              {
+                id: 304,
+                moduleId: 204,
+                title: 'QC Approval and Automated Export to Oracle Argus Safety Intake Queue',
+                description: 'Execute final QC check and transmit ICSR package to downstream safety database',
+                priority: 'high',
+                preconditions: 'Citation completed primary screening and medical valuation',
+                expectedOutcome: 'ICSR XML payload and PDF attachment transmitted to safety database intake queue',
+                status: 'draft',
+                testCases: [],
+              },
+            ],
+          },
+        ],
+      };
+      projects.push(lsmvProject);
+    }
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
+    return projects;
   } catch {
     return initialProjects as any;
   }
@@ -201,6 +313,10 @@ export const localStore = {
               ...m,
               project: { id: p.id, name: p.name, key: p.key, description: p.description, status: p.status },
             },
+            testCases: (s.testCases || []).map((tc) => ({
+              ...tc,
+              _count: { steps: tc.steps?.length || 0 },
+            })),
             _count: { testCases: s.testCases?.length || 0 },
           });
         });
@@ -481,6 +597,97 @@ export const localStore = {
     ].forEach((st) => localStore.addStep(validationCase.id, st));
 
     return { jobId: `local_${Date.now()}`, status: 'completed', testCases: [primaryCase, validationCase] };
+  },
+
+  saveGeneratedTestCase: (data: {
+    scenarioId?: number;
+    newScenarioTitle?: string;
+    title: string;
+    description?: string;
+    preConditions?: string;
+    postConditions?: string;
+    priority?: string;
+    steps: { stepNumber: number; description: string; expectedResult: string }[];
+    environment?: 'argus' | 'lsmv';
+  }) => {
+    const projects = loadProjects();
+    let targetScenario: Scenario | undefined;
+
+    if (data.scenarioId) {
+      for (const p of projects) {
+        for (const m of p.modules || []) {
+          targetScenario = m.scenarios?.find((s) => s.id === data.scenarioId);
+          if (targetScenario) break;
+        }
+        if (targetScenario) break;
+      }
+    }
+
+    if (!targetScenario) {
+      // Find or create matching project based on environment
+      const envKeyword = data.environment === 'lsmv' ? 'lsmv' : 'argus';
+      let proj = projects.find((p) => p.name.toLowerCase().includes(envKeyword));
+      if (!proj) {
+        proj = projects[0];
+      }
+      if (!proj.modules || proj.modules.length === 0) {
+        proj.modules = [
+          {
+            id: Date.now() + 1,
+            projectId: proj.id,
+            name: data.environment === 'lsmv' ? 'Literature Triage Scenarios' : 'Core Safety Scenarios',
+            orderIndex: 0,
+            scenarios: [],
+          },
+        ];
+      }
+      const mod = proj.modules[0];
+      if (!mod.scenarios) mod.scenarios = [];
+
+      const newScenarioId = Date.now() + 2;
+      targetScenario = {
+        id: newScenarioId,
+        moduleId: mod.id,
+        title: data.newScenarioTitle || data.title,
+        description: data.description || '',
+        priority: data.priority || 'high',
+        preconditions: data.preConditions || '',
+        expectedOutcome: data.postConditions || '',
+        status: 'draft',
+        testCases: [],
+      };
+      mod.scenarios.push(targetScenario);
+    }
+
+    if (!targetScenario.testCases) targetScenario.testCases = [];
+
+    const allTestCases = projects.flatMap(
+      (p) => p.modules?.flatMap((m) => m.scenarios?.flatMap((s) => s.testCases || []) || []) || []
+    );
+    const newId = Math.max(...allTestCases.map((tc) => tc.id), 0) + 1;
+
+    const newTestCase: TestCase = {
+      id: newId,
+      scenarioId: targetScenario.id,
+      title: data.title,
+      description: data.description || '',
+      preConditions: data.preConditions || '',
+      postConditions: data.postConditions || '',
+      priority: data.priority || 'high',
+      status: 'draft',
+      aiGenerated: true,
+      steps: data.steps.map((st, idx) => ({
+        id: Date.now() + idx + 10,
+        testCaseId: newId,
+        stepNumber: st.stepNumber,
+        description: st.description,
+        expectedResult: st.expectedResult,
+      })),
+    };
+
+    targetScenario.testCases.push(newTestCase);
+    saveProjects(projects);
+    return newTestCase;
   },
 
   generateTestSteps: (data: ScenarioInput) => {
