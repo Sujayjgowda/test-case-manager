@@ -1,4 +1,5 @@
 import initialProjects from './initial-data.json';
+import { generateArgusLsmvTestSteps } from './argus-lsmv-engine';
 
 const STORAGE_KEY = 'tcm_local_projects';
 
@@ -447,71 +448,42 @@ export const localStore = {
   // AI Generation on Client
   generateTestCasesForScenario: (scenarioId: number) => {
     const scenario = localStore.getScenarioById(scenarioId);
-    const cases = [
-      {
-        title: `${scenario.title} - Standard Positive Workflow`,
-        description: `Verify standard execution of "${scenario.title}" with valid data.`,
-        priority: 'high',
-        steps: [
-          { stepNumber: 1, description: `Navigate to ${scenario.module?.name} screen.`, expectedResult: 'Screen loads with inputs.' },
-          { stepNumber: 2, description: `Enter valid parameters for ${scenario.title}.`, expectedResult: 'All fields accept input.' },
-          { stepNumber: 3, description: 'Submit transaction.', expectedResult: 'Request processes and confirmation appears.' },
-          { stepNumber: 4, description: 'Verify expected outcome: ' + (scenario.expectedOutcome || 'Complete'), expectedResult: 'Status confirmed.' },
-        ],
-      },
-      {
-        title: `${scenario.title} - Mandatory Field Validation`,
-        description: `Verify system error handling when required inputs are omitted.`,
-        priority: 'medium',
-        steps: [
-          { stepNumber: 1, description: 'Open input form.', expectedResult: 'Form loads.' },
-          { stepNumber: 2, description: 'Leave required fields blank and click Submit.', expectedResult: 'Inline validation errors appear.' },
-          { stepNumber: 3, description: 'Verify record is not saved.', expectedResult: 'Database remains unchanged.' },
-        ],
-      },
-      {
-        title: `${scenario.title} - Boundary Limits Verification`,
-        description: `Verify system stability when entering boundary characters and lengths.`,
-        priority: 'medium',
-        steps: [
-          { stepNumber: 1, description: 'Enter maximum allowed length strings in all fields.', expectedResult: 'Lengths are constrained.' },
-          { stepNumber: 2, description: 'Submit transaction.', expectedResult: 'System saves cleanly without errors.' },
-        ],
-      },
-    ];
-
-    const created = cases.map((c) => {
-      const tc = localStore.createTestCase({
-        scenarioId,
-        title: c.title,
-        description: c.description,
-        priority: c.priority,
-        preConditions: scenario.preconditions,
-        postConditions: scenario.expectedOutcome,
-      });
-      c.steps.forEach((st) => localStore.addStep(tc.id, st));
-      return tc;
+    const argusStepsResult = generateArgusLsmvTestSteps({
+      scenarioTitle: scenario.title,
+      scenarioDescription: scenario.description,
+      preconditions: scenario.preconditions,
+      expectedOutcome: scenario.expectedOutcome,
     });
 
-    return { jobId: `local_${Date.now()}`, status: 'completed', testCases: created };
+    const primaryCase = localStore.createTestCase({
+      scenarioId,
+      title: `${scenario.title} - Argus / LSMV End-to-End Workflow`,
+      description: scenario.description || `Validate full pharmacovigilance workflow for ${scenario.title}`,
+      priority: scenario.priority || 'high',
+      preConditions: argusStepsResult.preConditions,
+      postConditions: argusStepsResult.postConditions,
+    });
+    argusStepsResult.steps.forEach((st) => localStore.addStep(primaryCase.id, st));
+
+    // Also create Negative & Conformance verification cases
+    const validationCase = localStore.createTestCase({
+      scenarioId,
+      title: `${scenario.title} - Mandatory Field & E2B(R3) Validation Checks`,
+      description: `Verify ICSR validation engine flags missing mandatory elements and blocks submission without required data.`,
+      priority: 'high',
+      preConditions: argusStepsResult.preConditions,
+      postConditions: `Validation errors displayed; case cannot be locked until errors resolved.`,
+    });
+    [
+      { stepNumber: 1, description: 'Open case in Argus Safety and clear mandatory Primary Reporter or Suspect Drug fields.', expectedResult: 'Mandatory field markers highlight in red.' },
+      { stepNumber: 2, description: 'Click "ICSR Validation Check".', expectedResult: 'Argus ICSR Validator presents list of critical E2B conformance errors.' },
+      { stepNumber: 3, description: 'Attempt to execute "Case Lock".', expectedResult: 'System blocks case locking and requires resolution of mandatory validation errors.' },
+    ].forEach((st) => localStore.addStep(validationCase.id, st));
+
+    return { jobId: `local_${Date.now()}`, status: 'completed', testCases: [primaryCase, validationCase] };
   },
 
   generateTestSteps: (data: { scenarioTitle: string; scenarioDescription?: string; preconditions?: string; expectedOutcome?: string }) => {
-    return {
-      title: data.scenarioTitle,
-      description: data.scenarioDescription || `Automated test steps for ${data.scenarioTitle}`,
-      preConditions: data.preconditions || 'Environment active',
-      postConditions: data.expectedOutcome || 'Execution successful',
-      steps: [
-        { stepNumber: 1, description: 'Log in with verified user credentials.', expectedResult: 'Dashboard opens.' },
-        { stepNumber: 2, description: `Navigate to module for "${data.scenarioTitle}".`, expectedResult: 'Target screen loads completely.' },
-        { stepNumber: 3, description: `Confirm preconditions: "${data.preconditions || 'Initial state ready'}".`, expectedResult: 'Preconditions verified.' },
-        { stepNumber: 4, description: 'Open action form/dialog.', expectedResult: 'Form renders with required fields.' },
-        { stepNumber: 5, description: `Enter valid test inputs for "${data.scenarioTitle}".`, expectedResult: 'Inputs validated.' },
-        { stepNumber: 6, description: 'Click Submit/Process.', expectedResult: 'Request processes and confirmation is shown.' },
-        { stepNumber: 7, description: `Validate outcome: "${data.expectedOutcome || 'Action completed'}".`, expectedResult: 'Records match expected state.' },
-        { stepNumber: 8, description: 'Verify audit log entry.', expectedResult: 'Audit log documents change with timestamp and user ID.' },
-      ],
-    };
+    return generateArgusLsmvTestSteps(data);
   },
 };

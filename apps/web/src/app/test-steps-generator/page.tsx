@@ -147,7 +147,7 @@ export default function TestStepsGeneratorPage() {
 
     const csv = [
       ['Step Number', 'Description', 'Expected Result'],
-      ...generatedResult.steps.map((s) => [s.stepNumber, s.description, s.expectedResult]),
+      ...generatedResult.steps.map((s) => [s.stepNumber, `"${s.description.replace(/"/g, '""')}"`, `"${s.expectedResult.replace(/"/g, '""')}"`]),
     ]
       .map((row) => row.join(','))
       .join('\n');
@@ -157,6 +157,36 @@ export default function TestStepsGeneratorPage() {
     const a = document.createElement('a');
     a.href = url;
     a.download = `${scenarioTitle.replace(/[^a-z0-9]/gi, '_')}_test_steps.csv`;
+    a.click();
+  };
+
+  const handleExportMarkdown = () => {
+    if (!generatedResult) return;
+    const md = `# ${generatedResult.title}
+
+**Domain:** Oracle Argus Safety & LSMV Pharmacovigilance
+**Status:** Validated Test Script
+
+## Description
+${generatedResult.description}
+
+## Preconditions
+${generatedResult.preConditions}
+
+## Expected Outcome
+${generatedResult.postConditions}
+
+## Detailed Pharmacovigilance Test Steps
+${generatedResult.steps.map((s) => `### Step ${s.stepNumber}
+- **Action:** ${s.description}
+- **Expected Result:** ${s.expectedResult}
+`).join('\n')}
+`;
+    const blob = new Blob([md], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${scenarioTitle.replace(/[^a-z0-9]/gi, '_')}_test_steps.md`;
     a.click();
   };
 
@@ -297,18 +327,27 @@ export default function TestStepsGeneratorPage() {
               </div>
             ) : generatedResult ? (
               <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <Badge variant="success">
-                    {generatedResult.steps.length} Steps Generated
-                  </Badge>
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="success">
+                      {generatedResult.steps.length} Steps Generated
+                    </Badge>
+                    <span className="inline-flex items-center rounded-md bg-purple-50 px-2 py-1 text-xs font-medium text-purple-700 ring-1 ring-inset ring-purple-700/10">
+                      Oracle Argus & LSMV Validated
+                    </span>
+                  </div>
                   <div className="flex gap-2">
                     <Button variant="outline" size="sm" onClick={handleCopySteps}>
                       <Copy className="w-4 h-4 mr-2" />
                       Copy
                     </Button>
+                    <Button variant="outline" size="sm" onClick={handleExportMarkdown}>
+                      <Download className="w-4 h-4 mr-2" />
+                      Markdown
+                    </Button>
                     <Button variant="outline" size="sm" onClick={handleExport}>
                       <Download className="w-4 h-4 mr-2" />
-                      Export
+                      CSV
                     </Button>
                   </div>
                 </div>
@@ -395,6 +434,44 @@ export default function TestStepsGeneratorPage() {
         </CardHeader>
         <CardContent>
           <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+            <TemplateCard
+              title="LSMV Literature Screening & Triage"
+              description="Screen medical journal articles in LSMV, evaluate ICSR criteria, and auto-create Argus case"
+              onClick={() => {
+                setScenarioTitle('LSMV Literature Screening & ICSR Promotion for Adverse Event');
+                setScenarioDescription(
+                  'Screen published medical journal article in LSMV, verify minimum 4 ICSR criteria, and promote citation into a new Argus Safety case.'
+                );
+                setPreconditions(
+                  '1. LSMV Literature Intake queue configured\n2. PubMed citation with full-text PDF indexed\n3. User has LSMV Literature Screener role'
+                );
+                setExpectedOutcome(
+                  'Article triaged as Potential ICSR; draft Argus case auto-created with literature citation and PubMed ID linked.'
+                );
+                setAdditionalInstructions(
+                  'Include 12-14 detailed steps covering literature triage queue, 4 ICSR criteria verification, duplicate search, case promotion, and Argus book-in verification.'
+                );
+              }}
+            />
+            <TemplateCard
+              title="Argus Spontaneous AE Book-in"
+              description="Capture spontaneous MedWatch 3500A report, duplicate search, and MedDRA auto-coding"
+              onClick={() => {
+                setScenarioTitle('Argus Safety Spontaneous Adverse Event Intake via MedWatch 3500A');
+                setScenarioDescription(
+                  'Capture spontaneous HCP report of severe adverse reaction, perform duplicate search, enter patient and suspect drug details, and auto-encode MedDRA.'
+                );
+                setPreconditions(
+                  '1. Argus Safety database accessible\n2. User has Case Processor privileges\n3. MedDRA v27.0 dictionary active'
+                );
+                setExpectedOutcome(
+                  'New Argus case successfully booked in and data entered with zero duplicate flags and correct MedDRA LLT/PT mapping.'
+                );
+                setAdditionalInstructions(
+                  'Include 12-15 detailed steps covering initial book-in, duplicate detection, reporter tab, patient demographics, product details, MedDRA encoding, and case save.'
+                );
+              }}
+            />
             <TemplateCard
               title="Blinded Case Creation"
               description="Generate steps for creating a blinded clinical trial case"
