@@ -32,10 +32,12 @@ interface GeneratedTestCase {
   description: string;
   preConditions: string;
   postConditions: string;
+  environment?: 'argus' | 'lsmv';
   steps: GeneratedStep[];
 }
 
 export default function TestStepsGeneratorPage() {
+  const [environment, setEnvironment] = useState<'argus' | 'lsmv'>('argus');
   const [scenarioTitle, setScenarioTitle] = useState('');
   const [scenarioDescription, setScenarioDescription] = useState('');
   const [preconditions, setPreconditions] = useState('');
@@ -72,6 +74,7 @@ export default function TestStepsGeneratorPage() {
             preconditions,
             expectedOutcome,
             additionalInstructions,
+            environment,
           }),
         });
 
@@ -87,21 +90,27 @@ export default function TestStepsGeneratorPage() {
         scenarioDescription,
         preconditions,
         expectedOutcome,
+        additionalInstructions,
+        environment,
       });
     },
     onSuccess: (data) => {
       setRetryCountdown(null);
-      // The /ai/generate-test-steps endpoint returns { title, description, preConditions, postConditions, steps }
+      // The endpoint returns { title, description, preConditions, postConditions, environment, steps }
       if (data.steps && Array.isArray(data.steps)) {
         setGeneratedResult({
           title: data.title || scenarioTitle,
           description: data.description || scenarioDescription,
           preConditions: data.preConditions || preconditions,
           postConditions: data.postConditions || expectedOutcome,
+          environment: data.environment || environment,
           steps: data.steps,
         });
       } else if (data.testCases && data.testCases.length > 0) {
-        setGeneratedResult(data.testCases[0]);
+        setGeneratedResult({
+          ...data.testCases[0],
+          environment: data.environment || environment,
+        });
       }
     },
     onError: (error: Error) => {
@@ -162,9 +171,11 @@ export default function TestStepsGeneratorPage() {
 
   const handleExportMarkdown = () => {
     if (!generatedResult) return;
+    const isLsmv = (generatedResult.environment || environment) === 'lsmv';
     const md = `# ${generatedResult.title}
 
-**Domain:** Oracle Argus Safety & LSMV Pharmacovigilance
+**Target Application:** ${isLsmv ? 'LSMV (Literature Screening & Medical Valuation)' : 'Oracle Argus Safety'}
+**Domain:** Pharmacovigilance & Drug Safety
 **Status:** Validated Test Script
 
 ## Description
@@ -176,7 +187,7 @@ ${generatedResult.preConditions}
 ## Expected Outcome
 ${generatedResult.postConditions}
 
-## Detailed Pharmacovigilance Test Steps
+## Detailed Pharmacovigilance Test Steps (${isLsmv ? 'LSMV Specific' : 'Oracle Argus Safety Specific'})
 ${generatedResult.steps.map((s) => `### Step ${s.stepNumber}
 - **Action:** ${s.description}
 - **Expected Result:** ${s.expectedResult}
@@ -186,7 +197,7 @@ ${generatedResult.steps.map((s) => `### Step ${s.stepNumber}
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${scenarioTitle.replace(/[^a-z0-9]/gi, '_')}_test_steps.md`;
+    a.download = `${scenarioTitle.replace(/[^a-z0-9]/gi, '_')}_${isLsmv ? 'lsmv' : 'argus'}_test_steps.md`;
     a.click();
   };
 
@@ -195,7 +206,7 @@ ${generatedResult.steps.map((s) => `### Step ${s.stepNumber}
       <div>
         <h1 className="text-3xl font-bold">AI Test Steps Generator</h1>
         <p className="text-muted-foreground mt-1">
-          Generate detailed test steps from your test scenarios using AI
+          Generate detailed, non-clubbed test steps strictly isolated for Oracle Argus Safety or LSMV
         </p>
       </div>
 
@@ -208,10 +219,42 @@ ${generatedResult.steps.map((s) => `### Step ${s.stepNumber}
               Scenario Input
             </CardTitle>
             <CardDescription>
-              Enter your test scenario details or select an existing scenario
+              Select your target application environment and scenario details
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {/* Environment Dropdown Selector */}
+            <div className="p-3.5 border-2 border-primary/20 bg-primary/5 rounded-lg space-y-2">
+              <label htmlFor="environment-select" className="block text-sm font-semibold text-foreground flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  Target Application Environment <span className="text-red-500">*</span>
+                </span>
+                <span className="text-xs font-medium text-primary uppercase tracking-wider">
+                  Isolated Test Steps
+                </span>
+              </label>
+              <select
+                id="environment-select"
+                value={environment}
+                onChange={(e) => setEnvironment(e.target.value as 'argus' | 'lsmv')}
+                className="w-full h-11 px-3 py-2 bg-background border-2 border-primary/40 rounded-md text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all cursor-pointer"
+              >
+                <option value="argus">🛡️ Oracle Argus Safety (Case Book-in, MedDRA, Case Lock, E2B-R3)</option>
+                <option value="lsmv">📖 LSMV (Literature Screening & Medical Valuation, ICSR Triage, PDF Review)</option>
+              </select>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                {environment === 'argus' ? (
+                  <span>
+                    <strong className="text-primary font-semibold">Oracle Argus Safety Active:</strong> Generates strict regulatory safety database steps (Book-in, Patient/Product/Events tabs, MedDRA, Listedness, 21 CFR Part 11 Lock, E2B-R3). Never mixes LSMV triage steps.
+                  </span>
+                ) : (
+                  <span>
+                    <strong className="text-emerald-700 font-semibold">LSMV Application Active:</strong> Generates strict literature workflow steps (PubMed/Embase Feed Ingestion, 4-Criteria Triage, Duplicate Screening, Full-Text PDF Review, Medical Valuation, Safety DB Export). Never mixes Argus Case Form tabs.
+                  </span>
+                )}
+              </p>
+            </div>
+
             <div>
               <label className="block text-sm font-medium mb-2">
                 Scenario Title <span className="text-red-500">*</span>
@@ -219,7 +262,11 @@ ${generatedResult.steps.map((s) => `### Step ${s.stepNumber}
               <Input
                 value={scenarioTitle}
                 onChange={(e) => setScenarioTitle(e.target.value)}
-                placeholder="e.g., Create Blinded Case for Clinical Trial AE"
+                placeholder={
+                  environment === 'argus'
+                    ? 'e.g., Argus Safety Spontaneous Adverse Event Intake via MedWatch 3500A'
+                    : 'e.g., LSMV Literature Screening & 4-Criteria ICSR Triage'
+                }
               />
             </div>
 
@@ -230,7 +277,11 @@ ${generatedResult.steps.map((s) => `### Step ${s.stepNumber}
               <Textarea
                 value={scenarioDescription}
                 onChange={(e) => setScenarioDescription(e.target.value)}
-                placeholder="Describe what this scenario tests..."
+                placeholder={
+                  environment === 'argus'
+                    ? 'Describe Argus Safety case intake, MedDRA coding, case lock, or E2B reporting...'
+                    : 'Describe LSMV literature search feed triage, duplicate screening, PDF review, or export...'
+                }
                 rows={3}
               />
             </div>
@@ -242,7 +293,11 @@ ${generatedResult.steps.map((s) => `### Step ${s.stepNumber}
               <Textarea
                 value={preconditions}
                 onChange={(e) => setPreconditions(e.target.value)}
-                placeholder="What must be true before this test (e.g., User is logged in, System is configured)..."
+                placeholder={
+                  environment === 'argus'
+                    ? 'e.g., User has Argus Case Processor role, MedDRA dictionary active, Study unmasked...'
+                    : 'e.g., PubMed/Embase feed indexed in LSMV, User has Literature Screener role, Full-text PDF available...'
+                }
                 rows={2}
               />
             </div>
@@ -254,7 +309,11 @@ ${generatedResult.steps.map((s) => `### Step ${s.stepNumber}
               <Textarea
                 value={expectedOutcome}
                 onChange={(e) => setExpectedOutcome(e.target.value)}
-                placeholder="What should happen after the test is completed..."
+                placeholder={
+                  environment === 'argus'
+                    ? 'e.g., Argus case booked in, MedDRA coded, locked with 21 CFR Part 11 signature, E2B-R3 submitted...'
+                    : 'e.g., 4 ICSR criteria satisfied, citation triaged as Potential ICSR, approved by Medical Reviewer, exported to Argus...'
+                }
                 rows={2}
               />
             </div>
@@ -266,7 +325,7 @@ ${generatedResult.steps.map((s) => `### Step ${s.stepNumber}
               <Textarea
                 value={additionalInstructions}
                 onChange={(e) => setAdditionalInstructions(e.target.value)}
-                placeholder="e.g., Include 10-15 detailed steps, Focus on data entry validation, Include error scenarios..."
+                placeholder="e.g., Include 10-15 detailed steps, Focus on data entry validation, Include negative error testing..."
                 rows={2}
               />
             </div>
@@ -280,18 +339,18 @@ ${generatedResult.steps.map((s) => `### Step ${s.stepNumber}
               {generateMutation.isPending ? (
                 <>
                   <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                  Generating Test Steps...
+                  Generating {environment === 'argus' ? 'Argus Safety' : 'LSMV'} Test Steps...
                 </>
               ) : (
                 <>
                   <Sparkles className="w-5 h-5 mr-2" />
-                  Generate Test Steps with AI
+                  Generate {environment === 'argus' ? 'Oracle Argus Safety' : 'LSMV'} Steps
                 </>
               )}
             </Button>
 
             <p className="text-xs text-muted-foreground text-center">
-              Takes about 30-60 seconds to generate comprehensive test steps
+              Dedicated test steps will be prepared strictly for {environment === 'argus' ? 'Oracle Argus Safety' : 'LSMV'}
             </p>
           </CardContent>
         </Card>
@@ -332,9 +391,15 @@ ${generatedResult.steps.map((s) => `### Step ${s.stepNumber}
                     <Badge variant="success">
                       {generatedResult.steps.length} Steps Generated
                     </Badge>
-                    <span className="inline-flex items-center rounded-md bg-purple-50 px-2 py-1 text-xs font-medium text-purple-700 ring-1 ring-inset ring-purple-700/10">
-                      Oracle Argus & LSMV Validated
-                    </span>
+                    {generatedResult.environment === 'lsmv' ? (
+                      <span className="inline-flex items-center rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800 ring-1 ring-inset ring-emerald-600/20">
+                        📖 LSMV Application Validated
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center rounded-md bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-800 ring-1 ring-inset ring-blue-600/20">
+                        🛡️ Oracle Argus Safety Validated
+                      </span>
+                    )}
                   </div>
                   <div className="flex gap-2">
                     <Button variant="outline" size="sm" onClick={handleCopySteps}>
@@ -427,166 +492,332 @@ ${generatedResult.steps.map((s) => `### Step ${s.stepNumber}
       {/* Quick Templates */}
       <Card>
         <CardHeader>
-          <CardTitle>Quick Templates</CardTitle>
-          <CardDescription>
-            Start with a pre-defined template and customize it
-          </CardDescription>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <CardTitle>Pharmacovigilance Quick Templates</CardTitle>
+              <CardDescription>
+                Select a validated template for either Oracle Argus Safety or LSMV application
+              </CardDescription>
+            </div>
+            {/* Quick Template Environment Switcher */}
+            <div className="flex rounded-lg border bg-muted p-1">
+              <button
+                type="button"
+                onClick={() => setEnvironment('argus')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
+                  environment === 'argus'
+                    ? 'bg-background text-primary shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                🛡️ Argus Safety Templates
+              </button>
+              <button
+                type="button"
+                onClick={() => setEnvironment('lsmv')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
+                  environment === 'lsmv'
+                    ? 'bg-background text-emerald-700 shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                📖 LSMV Templates
+              </button>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-            <TemplateCard
-              title="LSMV Literature Screening & Triage"
-              description="Screen medical journal articles in LSMV, evaluate ICSR criteria, and auto-create Argus case"
-              onClick={() => {
-                setScenarioTitle('LSMV Literature Screening & ICSR Promotion for Adverse Event');
-                setScenarioDescription(
-                  'Screen published medical journal article in LSMV, verify minimum 4 ICSR criteria, and promote citation into a new Argus Safety case.'
-                );
-                setPreconditions(
-                  '1. LSMV Literature Intake queue configured\n2. PubMed citation with full-text PDF indexed\n3. User has LSMV Literature Screener role'
-                );
-                setExpectedOutcome(
-                  'Article triaged as Potential ICSR; draft Argus case auto-created with literature citation and PubMed ID linked.'
-                );
-                setAdditionalInstructions(
-                  'Include 12-14 detailed steps covering literature triage queue, 4 ICSR criteria verification, duplicate search, case promotion, and Argus book-in verification.'
-                );
-              }}
-            />
-            <TemplateCard
-              title="Argus Spontaneous AE Book-in"
-              description="Capture spontaneous MedWatch 3500A report, duplicate search, and MedDRA auto-coding"
-              onClick={() => {
-                setScenarioTitle('Argus Safety Spontaneous Adverse Event Intake via MedWatch 3500A');
-                setScenarioDescription(
-                  'Capture spontaneous HCP report of severe adverse reaction, perform duplicate search, enter patient and suspect drug details, and auto-encode MedDRA.'
-                );
-                setPreconditions(
-                  '1. Argus Safety database accessible\n2. User has Case Processor privileges\n3. MedDRA v27.0 dictionary active'
-                );
-                setExpectedOutcome(
-                  'New Argus case successfully booked in and data entered with zero duplicate flags and correct MedDRA LLT/PT mapping.'
-                );
-                setAdditionalInstructions(
-                  'Include 12-15 detailed steps covering initial book-in, duplicate detection, reporter tab, patient demographics, product details, MedDRA encoding, and case save.'
-                );
-              }}
-            />
-            <TemplateCard
-              title="Blinded Case Creation"
-              description="Generate steps for creating a blinded clinical trial case"
-              onClick={() => {
-                setScenarioTitle('Create Blinded Case for Clinical Trial AE');
-                setScenarioDescription(
-                  'Verify that a user with Blinded Case Processor role can create a case where treatment information is hidden'
-                );
-                setPreconditions(
-                  '1. User is logged in with Blinded Case Processor role\n2. Study is configured for blind maintenance\n3. Patient meets eligibility for AE reporting'
-                );
-                setExpectedOutcome(
-                  'Case is saved with blinded status; Treatment field shows masked value'
-                );
-                setAdditionalInstructions(
-                  'Include 10-12 detailed steps covering navigation, data entry, product section, and verification. Include step to compare blinded vs unblinded view.'
-                );
-              }}
-            />
-            <TemplateCard
-              title="Emergency Unblinding"
-              description="Generate steps for emergency unblinding workflow"
-              onClick={() => {
-                setScenarioTitle('Emergency Unblinding Request Workflow');
-                setScenarioDescription(
-                  'Verify emergency unblinding process with proper authorization and documentation'
-                );
-                setPreconditions(
-                  '1. Blinded SAE case exists\n2. Investigator requests emergency unblinding\n3. User has unblinding authorization'
-                );
-                setExpectedOutcome(
-                  'Unblinding performed with audit trail; Notification sent; SAE timeline triggered'
-                );
-                setAdditionalInstructions(
-                  'Include 10 steps covering request initiation, authorization, unblinding action, audit trail verification, and notification confirmation.'
-                );
-              }}
-            />
-            <TemplateCard
-              title="Regulatory Submission"
-              description="Generate steps for E2B submission to health authority"
-              onClick={() => {
-                setScenarioTitle('Submit E2B R3 to FDA FAERS Gateway');
-                setScenarioDescription(
-                  'Verify electronic submission of ICH E2B R3 message to FDA FAERS'
-                );
-                setPreconditions(
-                  '1. Case is ready for FDA submission\n2. Gateway credentials configured\n3. Case meets FDA reporting criteria'
-                );
-                setExpectedOutcome(
-                  'Message transmitted successfully; ACK received and stored in case'
-                );
-                setAdditionalInstructions(
-                  'Include 8-10 steps covering case selection, submission initiation, gateway communication, ACK receipt, and verification.'
-                );
-              }}
-            />
-            <TemplateCard
-              title="Medical Review"
-              description="Generate steps for medical assessment workflow"
-              onClick={() => {
-                setScenarioTitle('Perform Medical Review of AE Case');
-                setScenarioDescription(
-                  'Verify medical reviewer can evaluate case completeness and accuracy'
-                );
-                setPreconditions(
-                  '1. Case is in Medical Review status\n2. User has Medical Reviewer role\n3. All data entry is complete'
-                );
-                setExpectedOutcome(
-                  'Medical reviewer can approve, reject, or request additional information'
-                );
-                setAdditionalInstructions(
-                  'Include steps for case review, causality assessment, seriousness determination, and approval workflow.'
-                );
-              }}
-            />
-            <TemplateCard
-              title="Duplicate Detection"
-              description="Generate steps for duplicate case checking"
-              onClick={() => {
-                setScenarioTitle('Validate Duplicate Case Detection');
-                setScenarioDescription(
-                  'Verify system identifies potential duplicate cases during intake'
-                );
-                setPreconditions(
-                  'Similar case already exists in database with matching patient and event details'
-                );
-                setExpectedOutcome(
-                  'System displays potential duplicates with match score for reviewer assessment'
-                );
-                setAdditionalInstructions(
-                  'Include steps for case creation, duplicate check trigger, match review, and decision (link or reject).'
-                );
-              }}
-            />
-            <TemplateCard
-              title="Safety Report Generation"
-              description="Generate steps for generating blinded safety reports"
-              onClick={() => {
-                setScenarioTitle('Generate Blinded Safety Report');
-                setScenarioDescription(
-                  'Verify generation of safety report with treatment groups masked'
-                );
-                setPreconditions(
-                  '1. Blinded cases exist in study\n2. User has Blinded Reporter role\n3. Report template configured for blinded output'
-                );
-                setExpectedOutcome(
-                  'Report shows Treatment A/B without revealing actual allocation'
-                );
-                setAdditionalInstructions(
-                  'Include 10 steps covering report selection, parameter configuration, generation, review, and blinding verification.'
-                );
-              }}
-            />
-          </div>
+          {environment === 'argus' ? (
+            <div>
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-xs font-semibold text-primary uppercase tracking-wider">
+                  🛡️ Oracle Argus Safety Dedicated Scenarios
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  Click any template to populate inputs for Argus Safety
+                </span>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                <TemplateCard
+                  badge="Argus Safety"
+                  badgeColor="blue"
+                  title="Argus Spontaneous AE Book-in"
+                  description="MedWatch 3500A report intake, duplicate search, General/Patient/Products/Events tabs, and MedDRA auto-coding"
+                  onClick={() => {
+                    setEnvironment('argus');
+                    setScenarioTitle('Argus Safety Spontaneous Adverse Event Intake via MedWatch 3500A');
+                    setScenarioDescription(
+                      'Capture spontaneous HCP report of severe adverse reaction, perform duplicate search, enter patient and suspect drug details, and auto-encode MedDRA.'
+                    );
+                    setPreconditions(
+                      '1. Argus Safety database accessible\n2. User has Case Processor privileges\n3. MedDRA v27.0 dictionary active'
+                    );
+                    setExpectedOutcome(
+                      'New Argus case successfully booked in and data entered with zero duplicate flags and correct MedDRA LLT/PT mapping.'
+                    );
+                    setAdditionalInstructions(
+                      'Include 12-15 detailed steps covering initial book-in, duplicate detection, reporter tab, patient demographics, product details, MedDRA encoding, and case save.'
+                    );
+                  }}
+                />
+                <TemplateCard
+                  badge="Argus Safety"
+                  badgeColor="blue"
+                  title="Blinded Clinical Trial Study Case"
+                  description="Clinical trial adverse event intake with protocol configuration and masked investigational medicinal product"
+                  onClick={() => {
+                    setEnvironment('argus');
+                    setScenarioTitle('Create Blinded Case for Clinical Trial AE');
+                    setScenarioDescription(
+                      'Verify that a user with Blinded Case Processor role can create a case where treatment information is masked.'
+                    );
+                    setPreconditions(
+                      '1. User is logged in with Blinded Case Processor role\n2. Clinical Study protocol configured for double-blind maintenance\n3. Patient enrolled and eligible'
+                    );
+                    setExpectedOutcome(
+                      'Case saved in Argus Safety with blinded status; Study Drug field displays masked value; unblinded access restricted.'
+                    );
+                    setAdditionalInstructions(
+                      'Include 10-12 detailed steps covering study selection, patient ID entry, blind maintenance verification, and audit log inspection.'
+                    );
+                  }}
+                />
+                <TemplateCard
+                  badge="Argus Safety"
+                  badgeColor="blue"
+                  title="MedDRA Auto-Coding & Hierarchy"
+                  description="Verbatim symptom entry, MedDRA browser search, primary SOC selection, and LLT/PT hierarchy mapping"
+                  onClick={() => {
+                    setEnvironment('argus');
+                    setScenarioTitle('Argus MedDRA Auto-Coding and Hierarchy Selection');
+                    setScenarioDescription(
+                      'Validate auto-encoding of verbatim adverse event term into MedDRA LLT, PT, and verification of primary SOC assignment.'
+                    );
+                    setPreconditions(
+                      '1. Case form open on Events tab\n2. Active MedDRA version loaded\n3. Verbatim adverse event entered'
+                    );
+                    setExpectedOutcome(
+                      'MedDRA coding engine resolves exact LLT match, displays full hierarchy path, and saves primary SOC correctly.'
+                    );
+                    setAdditionalInstructions(
+                      'Include 10 detailed steps covering verbatim entry, auto-code trigger, manual MedDRA browser lookup, hierarchy confirmation, and case audit save.'
+                    );
+                  }}
+                />
+                <TemplateCard
+                  badge="Argus Safety"
+                  badgeColor="blue"
+                  title="Medical Review & Causality"
+                  description="Evaluate company listedness against CCDS, assign WHO-UMC causality score, and sign off as Medical Reviewer"
+                  onClick={() => {
+                    setEnvironment('argus');
+                    setScenarioTitle('Argus Medical Review, Listedness & Causality Assessment');
+                    setScenarioDescription(
+                      'Verify physician medical review workflow including listedness comparison against Core Data Sheet and reporter vs company causality.'
+                    );
+                    setPreconditions(
+                      '1. Case is in Medical Review routing status\n2. User has Medical Reviewer privileges\n3. Data entry and MedDRA coding completed'
+                    );
+                    setExpectedOutcome(
+                      'Medical reviewer assessment recorded, listedness flagged appropriately, and case advanced to Quality Review.'
+                    );
+                    setAdditionalInstructions(
+                      'Include 10-12 steps covering Analysis tab, Listedness determination, Causality matrix, medical narrative summary, and routing.'
+                    );
+                  }}
+                />
+                <TemplateCard
+                  badge="Argus Safety"
+                  badgeColor="blue"
+                  title="21 CFR Part 11 Case Lock"
+                  description="Run ICSR validation check, verify mandatory fields, authenticate electronic signature, and execute case lock"
+                  onClick={() => {
+                    setEnvironment('argus');
+                    setScenarioTitle('Argus Safety 21 CFR Part 11 Electronic Signature and Case Lock');
+                    setScenarioDescription(
+                      'Verify validation engine enforces completeness checks and case lock locks all tabs requiring electronic signature authentication.'
+                    );
+                    setPreconditions(
+                      '1. Case in QA Approved status\n2. All mandatory ICSR fields populated\n3. User has Case Lock privileges'
+                    );
+                    setExpectedOutcome(
+                      'Case is locked, all case form fields become read-only, electronic signature recorded in audit log with timestamp.'
+                    );
+                    setAdditionalInstructions(
+                      'Include 10 steps covering ICSR validation check, Case Lock dialog, password authentication, audit trail verification, and read-only field verification.'
+                    );
+                  }}
+                />
+                <TemplateCard
+                  badge="Argus Safety"
+                  badgeColor="blue"
+                  title="Regulatory E2B(R3) Transmission"
+                  description="Generate ICH E2B(R3) XML message, transmit via B2B gateway to FDA FAERS/EMA, and verify ACK receipt"
+                  onClick={() => {
+                    setEnvironment('argus');
+                    setScenarioTitle('Submit E2B(R3) Regulatory Transmission to FDA FAERS');
+                    setScenarioDescription(
+                      'Verify electronic transmission of ICH E2B(R3) HL7 XML report to health authority gateway and parse MDN/ACK.'
+                    );
+                    setPreconditions(
+                      '1. Case is locked\n2. Reporting destination configured for FDA FAERS\n3. B2B ESM gateway active'
+                    );
+                    setExpectedOutcome(
+                      'E2B(R3) generation passes DTD/schema validation; transmission completes with ACK Code 01 (Accepted).'
+                    );
+                    setAdditionalInstructions(
+                      'Include 10 steps covering Regulatory Reports tab, ICSR viewer, E2B generation, gateway transmission, and ACK status confirmation.'
+                    );
+                  }}
+                />
+              </div>
+            </div>
+          ) : (
+            <div>
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-xs font-semibold text-emerald-700 uppercase tracking-wider">
+                  📖 LSMV (Literature Screening & Medical Valuation) Dedicated Scenarios
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  Click any template to populate inputs for LSMV
+                </span>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                <TemplateCard
+                  badge="LSMV"
+                  badgeColor="emerald"
+                  title="Search Feeds Ingestion & Intake"
+                  description="Ingest weekly PubMed/Embase bibliographic search feeds into the LSMV queue and assign screeners"
+                  onClick={() => {
+                    setEnvironment('lsmv');
+                    setScenarioTitle('LSMV Automated Literature Search Feed Ingestion & Screening Queue Intake');
+                    setScenarioDescription(
+                      'Ingest automated bibliographic feeds from PubMed and Embase, generate unique citation tracking IDs, and assign triage batches to screeners.'
+                    );
+                    setPreconditions(
+                      '1. LSMV database ingestion connector active\n2. Weekly literature search string configured\n3. User has LSMV Administrator role'
+                    );
+                    setExpectedOutcome(
+                      'Search batch ingested with 100% record count reconciliation; unreviewed citations populated in screener worklists.'
+                    );
+                    setAdditionalInstructions(
+                      'Include 10-12 steps covering search query feed run, citation import log, duplicate check against prior weeks, and worklist distribution.'
+                    );
+                  }}
+                />
+                <TemplateCard
+                  badge="LSMV"
+                  badgeColor="emerald"
+                  title="4-Criteria ICSR Triage Screening"
+                  description="Screen journal article title and abstract against 4 ICSR criteria: Reporter, Patient, Suspect Drug, Adverse Event"
+                  onClick={() => {
+                    setEnvironment('lsmv');
+                    setScenarioTitle('LSMV Literature Screening & 4-Criteria ICSR Triage');
+                    setScenarioDescription(
+                      'Screen published medical journal article in LSMV, evaluate minimum 4 ICSR criteria, and categorize citation as Potential ICSR or Non-ICSR.'
+                    );
+                    setPreconditions(
+                      '1. LSMV Literature Intake queue configured\n2. PubMed citation with full-text PDF indexed\n3. User has LSMV Literature Screener role'
+                    );
+                    setExpectedOutcome(
+                      'Article triaged as Potential ICSR; 4 criteria checklist verified and logged in LSMV screening record.'
+                    );
+                    setAdditionalInstructions(
+                      'Include 12-14 detailed steps covering literature triage queue, 4 ICSR criteria verification checklist, screening decision, and audit sign-off.'
+                    );
+                  }}
+                />
+                <TemplateCard
+                  badge="LSMV"
+                  badgeColor="emerald"
+                  title="Duplicate Citation Screening"
+                  description="Identify cross-database duplicates across PubMed and Embase using DOI, title similarity, and author matches"
+                  onClick={() => {
+                    setEnvironment('lsmv');
+                    setScenarioTitle('LSMV Cross-Database Duplicate Citation Screening and De-Duplication');
+                    setScenarioDescription(
+                      'Identify and merge duplicate citations across PubMed and Embase using DOI matching, title fuzzy logic, and master citation designation.'
+                    );
+                    setPreconditions(
+                      '1. LSMV triage batch loaded\n2. Identical study published in two indexed sources\n3. User has LSMV Screener role'
+                    );
+                    setExpectedOutcome(
+                      'System flags duplicate pair with match confidence score; user links duplicate to primary master citation without loss of bibliographic notes.'
+                    );
+                    setAdditionalInstructions(
+                      'Include 10 steps covering duplicate alert trigger, side-by-side metadata comparison, master selection, and audit trail record.'
+                    );
+                  }}
+                />
+                <TemplateCard
+                  badge="LSMV"
+                  badgeColor="emerald"
+                  title="Full-Text PDF Retrieval & Annotations"
+                  description="Retrieve full-text PDF article, annotate adverse event passages, off-label dosages, and medical history"
+                  onClick={() => {
+                    setEnvironment('lsmv');
+                    setScenarioTitle('LSMV Full-Text Article PDF Retrieval and Adverse Event Text Annotation');
+                    setScenarioDescription(
+                      'Retrieve full-text publisher PDF for flagged abstract, attach document to LSMV record, and highlight clinical AE findings.'
+                    );
+                    setPreconditions(
+                      '1. Citation triaged as Potential ICSR in LSMV\n2. Electronic journal access active\n3. Full-text PDF available'
+                    );
+                    setExpectedOutcome(
+                      'Full-text PDF attached; adverse event excerpts highlighted and mapped to structured screening fields.'
+                    );
+                    setAdditionalInstructions(
+                      'Include 10-12 steps covering PDF attachment, text annotation tool, extraction of patient age/gender, suspect drug dosage, and adverse event details.'
+                    );
+                  }}
+                />
+                <TemplateCard
+                  badge="LSMV"
+                  badgeColor="emerald"
+                  title="Medical Valuation & Special Situations"
+                  description="Physician valuation of off-label use, drug overdose, pregnancy exposure, and lack of therapeutic efficacy"
+                  onClick={() => {
+                    setEnvironment('lsmv');
+                    setScenarioTitle('LSMV Medical Valuation of Special Situations and Off-Label Use');
+                    setScenarioDescription(
+                      'Conduct medical evaluator review in LSMV for complex literature cases, assessing off-label use, pregnancy, and benefit-risk impact.'
+                    );
+                    setPreconditions(
+                      '1. Article triaged by primary screener\n2. Special situation flag present in article text\n3. User has LSMV Medical Evaluator role'
+                    );
+                    setExpectedOutcome(
+                      'Medical assessment documented with clinical rationale, special situation classification, and recommendation for safety database intake.'
+                    );
+                    setAdditionalInstructions(
+                      'Include 10 steps covering medical review queue, clinical valuation tab, special situation categorization, and medical concurrence sign-off.'
+                    );
+                  }}
+                />
+                <TemplateCard
+                  badge="LSMV"
+                  badgeColor="emerald"
+                  title="QC Review & Safety DB Export"
+                  description="Quality control dual-check, disposition confirmation, and automated XML/ICSR export to Oracle Argus Safety intake"
+                  onClick={() => {
+                    setEnvironment('lsmv');
+                    setScenarioTitle('LSMV Quality Control Sign-Off and ICSR Export to Safety Database');
+                    setScenarioDescription(
+                      'Perform secondary QC audit on completed literature triage record, verify attachments, and execute export to downstream safety database.'
+                    );
+                    setPreconditions(
+                      '1. Article passed primary screening and medical valuation\n2. User has LSMV QC Reviewer role\n3. Safety database interface configured'
+                    );
+                    setExpectedOutcome(
+                      'QC disposition approved; ICSR payload with bibliographic metadata and full-text PDF successfully transmitted to safety database intake queue.'
+                    );
+                    setAdditionalInstructions(
+                      'Include 10 steps covering QC worklist, reconciliation checklist, disposition approval, export trigger, and export transmission log verification.'
+                    );
+                  }}
+                />
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
@@ -596,22 +827,46 @@ ${generatedResult.steps.map((s) => `### Step ${s.stepNumber}
 function TemplateCard({
   title,
   description,
+  badge,
+  badgeColor = 'blue',
   onClick,
 }: {
   title: string;
   description: string;
+  badge?: string;
+  badgeColor?: 'blue' | 'emerald';
   onClick: () => void;
 }) {
   return (
     <div
       onClick={onClick}
-      className="p-4 border rounded-lg cursor-pointer hover:shadow-lg hover:border-primary transition-all"
+      className="p-4 border rounded-lg cursor-pointer hover:shadow-lg hover:border-primary transition-all flex flex-col justify-between group"
     >
-      <div className="flex items-center gap-2 mb-2">
-        <Plus className="w-4 h-4 text-primary" />
-        <h3 className="font-semibold">{title}</h3>
+      <div>
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <div className="flex items-center gap-2">
+            <Plus className="w-4 h-4 text-primary group-hover:scale-110 transition-transform" />
+            <h3 className="font-semibold text-sm group-hover:text-primary transition-colors">{title}</h3>
+          </div>
+          {badge && (
+            <span
+              className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded ${
+                badgeColor === 'emerald'
+                  ? 'bg-emerald-100 text-emerald-800'
+                  : 'bg-blue-100 text-blue-800'
+              }`}
+            >
+              {badge}
+            </span>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground leading-relaxed">{description}</p>
       </div>
-      <p className="text-sm text-muted-foreground">{description}</p>
+      <div className="mt-3 pt-2 border-t border-border/50 text-[11px] font-medium text-primary flex items-center justify-between">
+        <span>Use Template</span>
+        <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+      </div>
     </div>
   );
 }
+

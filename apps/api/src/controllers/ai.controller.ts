@@ -52,6 +52,7 @@ export async function generateTestStepsFromScenario(req: Request, res: Response,
       preconditions,
       expectedOutcome,
       additionalInstructions,
+      environment,
     } = req.body;
 
     const result = await aiService.generateTestStepsFromScenario({
@@ -60,6 +61,7 @@ export async function generateTestStepsFromScenario(req: Request, res: Response,
       preconditions,
       expectedOutcome,
       additionalInstructions,
+      environment,
     });
 
     res.json(result);

@@ -1,5 +1,5 @@
 import initialProjects from './initial-data.json';
-import { generateArgusLsmvTestSteps } from './argus-lsmv-engine';
+import { generateArgusLsmvTestSteps, ScenarioInput, TargetEnvironment } from './argus-lsmv-engine';
 
 const STORAGE_KEY = 'tcm_local_projects';
 
@@ -483,7 +483,7 @@ export const localStore = {
     return { jobId: `local_${Date.now()}`, status: 'completed', testCases: [primaryCase, validationCase] };
   },
 
-  generateTestSteps: (data: { scenarioTitle: string; scenarioDescription?: string; preconditions?: string; expectedOutcome?: string }) => {
+  generateTestSteps: (data: ScenarioInput) => {
     return generateArgusLsmvTestSteps(data);
   },
 };

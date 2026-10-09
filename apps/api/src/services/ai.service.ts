@@ -214,69 +214,144 @@ function generateFallbackStepsForScenario(data: {
   preconditions?: string;
   expectedOutcome?: string;
   additionalInstructions?: string;
+  environment?: 'argus' | 'lsmv';
 }) {
-  const { scenarioTitle, scenarioDescription, preconditions, expectedOutcome } = data;
+  const { scenarioTitle, scenarioDescription, preconditions, expectedOutcome, environment = 'argus' } = data;
 
+  const isLsmv = environment === 'lsmv' ||
+    scenarioTitle.toLowerCase().includes('lsmv') ||
+    (scenarioDescription || '').toLowerCase().includes('lsmv') ||
+    scenarioTitle.toLowerCase().includes('literature');
+
+  if (isLsmv) {
+    return {
+      title: scenarioTitle,
+      description: scenarioDescription || `LSMV Literature Screening & Medical Valuation: ${scenarioTitle}`,
+      preConditions: preconditions || 'LSMV Literature Intake queue configured; user authenticated with Screener/Medical Evaluator role.',
+      postConditions: expectedOutcome || 'Literature citation triaged, 4 ICSR criteria evaluated, and record disposition updated.',
+      environment: 'lsmv',
+      steps: [
+        {
+          stepNumber: 1,
+          description: 'Log into the LSMV (Literature Screening & Medical Valuation) application worklist.',
+          expectedResult: 'LSMV dashboard displays unreviewed literature batches and citation counts.',
+        },
+        {
+          stepNumber: 2,
+          description: 'Navigate to Literature Triage Queue and filter by search strategy feed (PubMed / Embase).',
+          expectedResult: 'Target citation list is displayed with Title, Abstract, Source Journal, and PMID / DOI.',
+        },
+        {
+          stepNumber: 3,
+          description: 'Select target article row to open the LSMV Citation Evaluation viewer.',
+          expectedResult: 'Article metadata pane, Abstract tab, and Full-Text viewer render without error.',
+        },
+        {
+          stepNumber: 4,
+          description: 'Execute duplicate citation cross-check against existing records in LSMV database.',
+          expectedResult: 'Duplicate screening engine compares DOI/title and displays match score.',
+        },
+        {
+          stepNumber: 5,
+          description: 'Evaluate the 4 mandatory ICSR minimum criteria: Identifiable Reporter, Identifiable Patient, Suspect Product, and Adverse Event.',
+          expectedResult: 'Screener checklist reflects compliance for all 4 ICSR criteria or flags missing elements.',
+        },
+        {
+          stepNumber: 6,
+          description: 'Access the Full-Text PDF Viewer tab and review full journal publication.',
+          expectedResult: 'High-resolution PDF opens with text search and annotation capabilities active.',
+        },
+        {
+          stepNumber: 7,
+          description: 'Highlight and annotate adverse event narrative, patient demographics, and dosage regimens.',
+          expectedResult: 'Clinical annotations saved and linked to structured extraction fields in LSMV.',
+        },
+        {
+          stepNumber: 8,
+          description: 'Route citation to Medical Valuation tab for physician review (Special Situations / Off-Label / Causality).',
+          expectedResult: 'Medical Evaluator assessment section unlocks for clinical comments and sign-off.',
+        },
+        {
+          stepNumber: 9,
+          description: 'Assign final screening disposition: "Potential ICSR" or "Non-ICSR / No Safety Signal".',
+          expectedResult: 'Triage disposition badge updates with reason code recorded in audit trail.',
+        },
+        {
+          stepNumber: 10,
+          description: 'For Potential ICSRs, trigger Export to Safety Database (Oracle Argus Safety Intake Queue).',
+          expectedResult: 'LSMV transmits bibliographic metadata, abstract, and PDF attachment to safety intake queue.',
+        },
+        {
+          stepNumber: 11,
+          description: 'Verify LSMV audit log and transmission status.',
+          expectedResult: 'Audit log reflects user ID, timestamp, disposition decision, and transmission confirmation.',
+        },
+      ],
+    };
+  }
+
+  // Oracle Argus Safety dedicated steps
   return {
     title: scenarioTitle,
-    description: scenarioDescription || `Detailed test steps for ${scenarioTitle}`,
-    preConditions: preconditions || 'System environment initialized and user authenticated',
-    postConditions: expectedOutcome || 'Outcome validated and transaction committed',
+    description: scenarioDescription || `Oracle Argus Safety: ${scenarioTitle}`,
+    preConditions: preconditions || 'Oracle Argus Safety enterprise database active; user logged in with Case Processor role.',
+    postConditions: expectedOutcome || 'Case processed in Argus Safety, validated, locked with 21 CFR Part 11 signature, and submitted.',
+    environment: 'argus',
     steps: [
       {
         stepNumber: 1,
-        description: 'Log in to the system with appropriate QA or administrative credentials.',
-        expectedResult: 'Authentication succeeds and main dashboard is displayed.',
+        description: 'Log into Oracle Argus Safety application using authorized Case Processor credentials.',
+        expectedResult: 'Argus Safety home portal loads displaying Personal Worklist and Case Intake queue.',
       },
       {
         stepNumber: 2,
-        description: `Navigate to the feature area corresponding to "${scenarioTitle}".`,
-        expectedResult: 'Target screen loads completely with all UI components accessible.',
+        description: 'Navigate to Case Actions > BookIn and select Initial Case Book-in.',
+        expectedResult: 'Argus BookIn window opens with Report Type, Country, and Receipt Date fields populated.',
       },
       {
         stepNumber: 3,
-        description: `Verify that preconditions are met: "${preconditions || 'Prerequisites active'}".`,
-        expectedResult: 'Prerequisite data and environment variables are verified.',
+        description: 'Execute mandatory Duplicate Search by entering patient initials, adverse event, and suspect drug.',
+        expectedResult: 'Duplicate search grid confirms no existing matching cases in the Argus database.',
       },
       {
         stepNumber: 4,
-        description: 'Open the primary data entry or workflow execution dialog.',
-        expectedResult: 'Form renders with required fields highlighted and default options set.',
+        description: 'Enter General Tab details: Primary Reporter information, Healthcare Professional flag, and Receipt Date.',
+        expectedResult: 'Reporter details validated and saved to Argus General tab.',
       },
       {
         stepNumber: 5,
-        description: `Populate all required input fields with valid test data tailored to "${scenarioTitle}".`,
-        expectedResult: 'Inputs pass client-side regex and format validations.',
+        description: 'Navigate to Patient Tab and record Demographics (Age, Gender, Weight) and Medical History.',
+        expectedResult: 'Patient identifiers stored with privacy masking according to enterprise configuration.',
       },
       {
         stepNumber: 6,
-        description: 'Configure optional settings, tags, or secondary attributes.',
-        expectedResult: 'All secondary parameters are correctly selected and reflected.',
+        description: 'Navigate to Products Tab and enter Suspect Product name, dosage formulation, and indication.',
+        expectedResult: 'Product selected from Argus Company Product Dictionary with WHO-DD link established.',
       },
       {
         stepNumber: 7,
-        description: 'Click Submit / Execute to trigger processing.',
-        expectedResult: 'System displays progress indicator and sends request payload to backend.',
+        description: 'Navigate to Events Tab, enter verbatim adverse event term, and trigger MedDRA Auto-Coding.',
+        expectedResult: 'MedDRA coding engine resolves term to LLT, PT, and displays primary SOC hierarchy.',
       },
       {
         stepNumber: 8,
-        description: 'Observe the response notification and status banner.',
-        expectedResult: 'Success confirmation dialog/banner is displayed.',
+        description: 'Navigate to Analysis Tab to perform Listedness determination against CCDS and record Causality assessment.',
+        expectedResult: 'Listedness auto-populates as Unlisted/Listed and physician causality score is recorded.',
       },
       {
         stepNumber: 9,
-        description: `Verify the primary expected outcome: "${expectedOutcome || 'Operation completed successfully'}".`,
-        expectedResult: 'Result status matches expected criteria without discrepancies.',
+        description: 'Click "ICSR Validation" button to execute comprehensive validation checks.',
+        expectedResult: 'Argus validation window displays "0 Errors, 0 Warnings" confirming E2B(R3) conformance.',
       },
       {
         stepNumber: 10,
-        description: 'Refresh the page or re-query the record from the grid / list view.',
-        expectedResult: 'Saved record is retrieved accurately with all entered values preserved.',
+        description: 'Execute Case Lock under Case Actions > Case Lock with 21 CFR Part 11 electronic signature authentication.',
+        expectedResult: 'Case status changes to "Locked", all form fields become read-only, and audit trail logs signature.',
       },
       {
         stepNumber: 11,
-        description: 'Inspect system audit trail and compliance log.',
-        expectedResult: 'Audit log reflects timestamp, authorized user ID, and action details.',
+        description: 'Generate E2B(R3) electronic report and transmit to health authority gateway (FDA FAERS / EMA).',
+        expectedResult: 'E2B(R3) XML generated, transmitted via B2B gateway, and positive MDN ACK (Code 01) captured.',
       },
     ],
   };
@@ -617,6 +692,7 @@ export async function generateTestStepsFromScenario(data: {
   preconditions: string;
   expectedOutcome: string;
   additionalInstructions?: string;
+  environment?: 'argus' | 'lsmv';
 }) {
   const {
     scenarioTitle,
@@ -624,23 +700,40 @@ export async function generateTestStepsFromScenario(data: {
     preconditions,
     expectedOutcome,
     additionalInstructions,
+    environment = 'argus',
   } = data;
 
-  const aiPrompt = `You are an expert QA engineer specializing in pharmaceutical and clinical testing. Generate detailed test steps for the following test scenario:
+  const isLsmv = environment === 'lsmv' ||
+    scenarioTitle.toLowerCase().includes('lsmv') ||
+    (scenarioDescription || '').toLowerCase().includes('lsmv') ||
+    scenarioTitle.toLowerCase().includes('literature');
+
+  const appGuidance = isLsmv
+    ? `TARGET APPLICATION: LSMV (Literature Screening & Medical Valuation).
+CRITICAL: Generate test steps STRICTLY for LSMV (PubMed/Embase Feed Ingestion, 4-Criteria ICSR Triage [Reporter, Patient, Drug, Event], Duplicate Screening, Full-Text PDF Review, Medical Valuation, QC Audit & Export to Safety DB).
+DO NOT INCLUDE or club Oracle Argus Safety Case Form tabs (BookIn, General, Patient, Product, Events tabs). Keep steps 100% focused on LSMV.`
+    : `TARGET APPLICATION: Oracle Argus Safety.
+CRITICAL: Generate test steps STRICTLY for Oracle Argus Safety (Case Intake/Book-in, Duplicate Detection, General, Patient, Products, Events tabs, MedDRA Auto-Coding, Listedness, WHO Causality, 21 CFR Part 11 Case Lock, E2B-R3 Regulatory Submission).
+DO NOT INCLUDE or club LSMV Literature Triage steps. Keep steps 100% focused on Oracle Argus Safety.`;
+
+  const aiPrompt = `You are an expert QA engineer specializing in Pharmacovigilance and Drug Safety systems validation. Generate detailed test steps for the following test scenario:
 
 **Scenario Title:** ${scenarioTitle}
+**Target Environment:** ${isLsmv ? 'LSMV (Literature Screening & Medical Valuation)' : 'Oracle Argus Safety'}
 **Description:** ${scenarioDescription || 'No description provided'}
 **Preconditions:** ${preconditions || 'None specified'}
 **Expected Outcome:** ${expectedOutcome || 'Not specified'}
 
+${appGuidance}
+
 ${additionalInstructions ? `**Additional Instructions:** ${additionalInstructions}` : ''}
 
 Requirements:
-- Generate 10-15 detailed, actionable test steps
+- Generate 10-15 detailed, actionable test steps strictly for this application
 - Each step should have a clear action and expected result
 - Include navigation steps, data entry steps, verification steps, and outcome validation
 - Cover the complete workflow from start to finish
-- Include both positive path and relevant edge cases
+- Include both positive path and relevant validation checks
 
 Format the response as JSON (no markdown, no extra text):
 {
@@ -648,6 +741,7 @@ Format the response as JSON (no markdown, no extra text):
   "description": "${scenarioDescription || ''}",
   "preConditions": "${preconditions || ''}",
   "postConditions": "${expectedOutcome || ''}",
+  "environment": "${isLsmv ? 'lsmv' : 'argus'}",
   "steps": [
     {
       "stepNumber": 1,
