@@ -11,6 +11,7 @@
     "./utils": "./src/utils/index.ts"
   },
   "scripts": {
+    "build": "echo @tcm/shared ready",
     "lint": "eslint src --ext .ts",
     "test": "vitest"
   },

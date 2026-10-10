@@ -6,10 +6,10 @@ export async function getAll(req: Request, res: Response, next: NextFunction) {
   try {
     const { moduleId, status, page = '1', limit = '10' } = req.query;
     const scenarios = await scenarioService.getAll({
-      moduleId: moduleId ? parseInt(moduleId as string) : undefined,
+      moduleId: moduleId ? parseInt(moduleId as string, 10) : undefined,
       status: status as string,
-      page: parseInt(page as string),
-      limit: parseInt(limit as string),
+      page: parseInt(page as string, 10),
+      limit: parseInt(limit as string, 10),
     });
     res.json(scenarios);
   } catch (error) {
@@ -19,7 +19,7 @@ export async function getAll(req: Request, res: Response, next: NextFunction) {
 
 export async function getById(req: Request, res: Response, next: NextFunction) {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id as string, 10);
     const scenario = await scenarioService.getById(id);
     res.json(scenario);
   } catch (error) {
@@ -38,7 +38,7 @@ export async function create(req: Request, res: Response, next: NextFunction) {
 
 export async function update(req: Request, res: Response, next: NextFunction) {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id as string, 10);
     const scenario = await scenarioService.update(id, req.body);
     res.json(scenario);
   } catch (error) {
@@ -48,8 +48,8 @@ export async function update(req: Request, res: Response, next: NextFunction) {
 
 export async function deleteScenario(req: Request, res: Response, next: NextFunction) {
   try {
-    const id = parseInt(req.params.id);
-    await scenarioService.delete(id);
+    const id = parseInt(req.params.id as string, 10);
+    await scenarioService.deleteScenario(id);
     res.status(204).send();
   } catch (error) {
     next(error);
@@ -68,7 +68,7 @@ export async function bulkCreate(req: Request, res: Response, next: NextFunction
 
 export async function generateTestCases(req: Request, res: Response, next: NextFunction) {
   try {
-    const scenarioId = parseInt(req.params.id);
+    const scenarioId = parseInt(req.params.id as string, 10);
     const { prompt, options } = req.body;
 
     const job = await aiService.generateTestCases(scenarioId, prompt, options);
@@ -80,7 +80,7 @@ export async function generateTestCases(req: Request, res: Response, next: NextF
 
 export async function getGenerationStatus(req: Request, res: Response, next: NextFunction) {
   try {
-    const scenarioId = parseInt(req.params.id);
+    const scenarioId = parseInt(req.params.id as string, 10);
     const status = await aiService.getGenerationStatus(scenarioId);
     res.json(status);
   } catch (error) {

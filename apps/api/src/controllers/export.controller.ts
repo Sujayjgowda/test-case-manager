@@ -3,7 +3,7 @@ import * as exportService from '../services/export.service.js';
 
 export async function exportJson(req: Request, res: Response, next: NextFunction) {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id as string, 10);
     const buffer = await exportService.exportToJson(id);
 
     res.setHeader('Content-Type', 'application/json');
@@ -16,7 +16,7 @@ export async function exportJson(req: Request, res: Response, next: NextFunction
 
 export async function exportMarkdown(req: Request, res: Response, next: NextFunction) {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id as string, 10);
     const markdown = await exportService.exportToMarkdown(id);
 
     res.setHeader('Content-Type', 'text/markdown');
@@ -29,7 +29,7 @@ export async function exportMarkdown(req: Request, res: Response, next: NextFunc
 
 export async function exportPdf(req: Request, res: Response, next: NextFunction) {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id as string, 10);
     const buffer = await exportService.exportToPdf(id);
 
     res.setHeader('Content-Type', 'application/pdf');
@@ -42,7 +42,7 @@ export async function exportPdf(req: Request, res: Response, next: NextFunction)
 
 export async function exportExcel(req: Request, res: Response, next: NextFunction) {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id as string, 10);
     const buffer = await exportService.exportToExcel(id);
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -68,7 +68,7 @@ export async function bulkExport(req: Request, res: Response, next: NextFunction
 
 export async function exportScenario(req: Request, res: Response, next: NextFunction) {
   try {
-    const scenarioId = parseInt(req.params.id);
+    const scenarioId = parseInt(req.params.id as string, 10);
     const { format = 'json' } = req.query;
     const result = await exportService.exportScenario(scenarioId, format as string);
 

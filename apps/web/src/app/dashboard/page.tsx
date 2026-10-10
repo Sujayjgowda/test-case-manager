@@ -9,26 +9,26 @@ import {
   FolderOpen,
   ClipboardList,
   CheckSquare,
-  TrendingUp,
-  Plus,
+  Bot,
   ArrowRight,
+  Sparkles,
 } from 'lucide-react';
 import Link from 'next/link';
 
 export default function DashboardPage() {
   const { data: projects, isLoading: projectsLoading } = useQuery({
     queryKey: ['projects'],
-    queryFn: () => projectsApi.getAll().then((res) => res.data),
+    queryFn: () => projectsApi.list(),
   });
 
   const { data: scenarios } = useQuery({
     queryKey: ['scenarios'],
-    queryFn: () => scenariosApi.getAll().then((res) => res.data),
+    queryFn: () => scenariosApi.list(),
   });
 
   const { data: testCases } = useQuery({
     queryKey: ['test-cases'],
-    queryFn: () => testCasesApi.getAll().then((res) => res.data),
+    queryFn: () => testCasesApi.list(),
   });
 
   const projectList = Array.isArray(projects) ? projects : projects?.data || [];
@@ -41,55 +41,62 @@ export default function DashboardPage() {
       label: 'Total Projects',
       value: projectList.length,
       icon: FolderOpen,
-      color: 'text-blue-500',
+      gradient: 'from-blue-500 to-cyan-500',
+      bg: 'bg-blue-50',
     },
     {
       label: 'Active Scenarios',
       value: scenarioList.length,
       icon: ClipboardList,
-      color: 'text-green-500',
+      gradient: 'from-emerald-500 to-teal-500',
+      bg: 'bg-emerald-50',
     },
     {
       label: 'Test Cases',
       value: testCaseList.length,
       icon: CheckSquare,
-      color: 'text-purple-500',
+      gradient: 'from-violet-500 to-purple-500',
+      bg: 'bg-violet-50',
     },
     {
       label: 'AI Generated',
       value: aiGeneratedCount,
-      icon: TrendingUp,
-      color: 'text-orange-500',
+      icon: Bot,
+      gradient: 'from-indigo-500 to-blue-500',
+      bg: 'bg-indigo-50',
     },
   ];
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 max-w-[1400px] mx-auto">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Dashboard</h1>
-          <p className="text-muted-foreground mt-1">Overview of your testing activities</p>
+          <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
+          <p className="text-gray-500 mt-1">Overview of your pharmacovigilance testing</p>
         </div>
-        <Link href="/projects/new">
-          <Button>
-            <Plus className="w-4 h-4 mr-2" />
-            New Project
+        <Link href="/test-steps-generator">
+          <Button className="bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 shadow-lg shadow-indigo-200/50 font-bold">
+            <Sparkles className="w-4 h-4 mr-2" />
+            Generate Test Script
           </Button>
         </Link>
       </div>
 
       {/* Stats Grid */}
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-4">
         {stats.map((stat) => {
           const Icon = stat.icon;
           return (
-            <Card key={stat.label}>
+            <Card key={stat.label} className="border-0 shadow-md ring-1 ring-gray-100">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">{stat.label}</CardTitle>
-                <Icon className={`w-4 h-4 ${stat.color}`} />
+                <CardTitle className="text-sm font-medium text-gray-500">{stat.label}</CardTitle>
+                <div className={`p-2 rounded-lg ${stat.bg}`}>
+                  <Icon className={`w-4 h-4 bg-gradient-to-r ${stat.gradient} bg-clip-text`} style={{ color: 'transparent', WebkitBackgroundClip: 'text', backgroundImage: `linear-gradient(to right, var(--tw-gradient-stops))` }} />
+                </div>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{stat.value}</div>
+                <div className="text-3xl font-extrabold text-gray-900">{stat.value}</div>
               </CardContent>
             </Card>
           );
@@ -97,29 +104,31 @@ export default function DashboardPage() {
       </div>
 
       {/* Recent Projects */}
-      <Card>
+      <Card className="border-0 shadow-md ring-1 ring-gray-100">
         <CardHeader>
-          <CardTitle>Recent Projects</CardTitle>
-          <CardDescription>Your latest projects and their status</CardDescription>
+          <CardTitle className="text-lg">Recent Projects</CardTitle>
+          <CardDescription>Your latest pharmacovigilance test projects</CardDescription>
         </CardHeader>
         <CardContent>
           {projectsLoading ? (
-            <div className="text-center py-8 text-muted-foreground">Loading...</div>
+            <div className="text-center py-8 text-gray-400">Loading projects...</div>
           ) : projectList.length > 0 ? (
-            <div className="space-y-4">
-              {projectList.map((project: any) => (
+            <div className="space-y-3">
+              {projectList.slice(0, 5).map((project: any) => (
                 <div
                   key={project.id}
-                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 transition-colors"
+                  className="flex items-center justify-between p-4 border rounded-xl hover:bg-gray-50 transition-all"
                 >
                   <div className="flex items-center gap-4">
-                    <FolderOpen className="w-8 h-8 text-primary" />
+                    <div className="p-2.5 bg-blue-50 rounded-lg">
+                      <FolderOpen className="w-5 h-5 text-blue-500" />
+                    </div>
                     <div>
-                      <h3 className="font-semibold">{project.name}</h3>
-                      <p className="text-sm text-muted-foreground">{project.key}</p>
+                      <h3 className="font-bold text-sm text-gray-900">{project.name}</h3>
+                      <p className="text-xs text-gray-400">{project.key}</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-3">
                     <Badge
                       variant={
                         project.status === 'active'
@@ -128,13 +137,14 @@ export default function DashboardPage() {
                           ? 'secondary'
                           : 'outline'
                       }
+                      className="text-[10px]"
                     >
                       {project.status}
                     </Badge>
                     <Link href={`/projects/${project.id}`}>
-                      <Button variant="ghost" size="sm">
+                      <Button variant="ghost" size="sm" className="text-xs">
                         View
-                        <ArrowRight className="w-4 h-4 ml-2" />
+                        <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
                       </Button>
                     </Link>
                   </div>
@@ -142,45 +152,60 @@ export default function DashboardPage() {
               ))}
             </div>
           ) : (
-            <div className="text-center py-8">
-              <p className="text-muted-foreground mb-4">No projects yet</p>
-              <Link href="/projects/new">
-                <Button>Create your first project</Button>
-              </Link>
+            <div className="text-center py-12">
+              <div className="p-4 bg-gray-100 rounded-2xl inline-block mb-4">
+                <FolderOpen className="w-8 h-8 text-gray-400" />
+              </div>
+              <p className="text-gray-500 font-medium mb-1">No projects yet</p>
+              <p className="text-xs text-gray-400 mb-4">
+                Create your first project to start organizing test scenarios
+              </p>
             </div>
           )}
         </CardContent>
       </Card>
 
       {/* Quick Actions */}
-      <div className="grid gap-6 md:grid-cols-3">
-        <Card className="hover:shadow-md transition-shadow cursor-pointer">
-          <Link href="/scenarios/new">
+      <div className="grid gap-5 md:grid-cols-3">
+        <Link href="/test-steps-generator" className="group">
+          <Card className="border-0 shadow-md ring-1 ring-gray-100 hover:shadow-xl hover:ring-indigo-200 transition-all h-full">
             <CardHeader>
-              <ClipboardList className="w-8 h-8 text-green-500 mb-2" />
-              <CardTitle>New Scenario</CardTitle>
-              <CardDescription>Create a new test scenario</CardDescription>
+              <div className="p-3 bg-gradient-to-br from-indigo-500 to-blue-600 rounded-xl w-fit mb-2 shadow-lg shadow-indigo-200/40 group-hover:scale-110 transition-transform">
+                <Bot className="w-5 h-5 text-white" />
+              </div>
+              <CardTitle className="text-base">AI Test Script Generator</CardTitle>
+              <CardDescription className="text-xs">
+                Generate complete test scripts with SambaNova AI
+              </CardDescription>
             </CardHeader>
-          </Link>
-        </Card>
-        <Card className="hover:shadow-md transition-shadow cursor-pointer">
-          <Link href="/test-cases/new">
+          </Card>
+        </Link>
+        <Link href="/scenarios" className="group">
+          <Card className="border-0 shadow-md ring-1 ring-gray-100 hover:shadow-xl hover:ring-emerald-200 transition-all h-full">
             <CardHeader>
-              <CheckSquare className="w-8 h-8 text-purple-500 mb-2" />
-              <CardTitle>New Test Case</CardTitle>
-              <CardDescription>Manually create a test case</CardDescription>
+              <div className="p-3 bg-gradient-to-br from-emerald-500 to-teal-500 rounded-xl w-fit mb-2 shadow-lg shadow-emerald-200/40 group-hover:scale-110 transition-transform">
+                <ClipboardList className="w-5 h-5 text-white" />
+              </div>
+              <CardTitle className="text-base">View Scenarios</CardTitle>
+              <CardDescription className="text-xs">
+                Browse and manage test scenarios
+              </CardDescription>
             </CardHeader>
-          </Link>
-        </Card>
-        <Card className="hover:shadow-md transition-shadow cursor-pointer">
-          <Link href="/projects">
+          </Card>
+        </Link>
+        <Link href="/test-cases" className="group">
+          <Card className="border-0 shadow-md ring-1 ring-gray-100 hover:shadow-xl hover:ring-violet-200 transition-all h-full">
             <CardHeader>
-              <FolderOpen className="w-8 h-8 text-blue-500 mb-2" />
-              <CardTitle>Browse Projects</CardTitle>
-              <CardDescription>View all your projects</CardDescription>
+              <div className="p-3 bg-gradient-to-br from-violet-500 to-purple-500 rounded-xl w-fit mb-2 shadow-lg shadow-violet-200/40 group-hover:scale-110 transition-transform">
+                <CheckSquare className="w-5 h-5 text-white" />
+              </div>
+              <CardTitle className="text-base">Test Cases</CardTitle>
+              <CardDescription className="text-xs">
+                View all test cases and AI-generated scripts
+              </CardDescription>
             </CardHeader>
-          </Link>
-        </Card>
+          </Card>
+        </Link>
       </div>
     </div>
   );

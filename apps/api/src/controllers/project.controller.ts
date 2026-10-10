@@ -1,14 +1,12 @@
 import { Request, Response, NextFunction } from 'express';
-import { prisma } from '../index.js';
-import { NotFoundError, ConflictError } from '../middleware/error-handler.js';
 import * as projectService from '../services/project.service.js';
 
 export async function getAll(req: Request, res: Response, next: NextFunction) {
   try {
     const { page = '1', limit = '10', status } = req.query;
     const projects = await projectService.getAll({
-      page: parseInt(page as string),
-      limit: parseInt(limit as string),
+      page: parseInt(page as string, 10),
+      limit: parseInt(limit as string, 10),
       status: status as string,
     });
     res.json(projects);
@@ -19,7 +17,7 @@ export async function getAll(req: Request, res: Response, next: NextFunction) {
 
 export async function getById(req: Request, res: Response, next: NextFunction) {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id as string, 10);
     const project = await projectService.getById(id);
     res.json(project);
   } catch (error) {
@@ -38,7 +36,7 @@ export async function create(req: Request, res: Response, next: NextFunction) {
 
 export async function update(req: Request, res: Response, next: NextFunction) {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id as string, 10);
     const project = await projectService.update(id, req.body);
     res.json(project);
   } catch (error) {
@@ -48,8 +46,8 @@ export async function update(req: Request, res: Response, next: NextFunction) {
 
 export async function deleteProject(req: Request, res: Response, next: NextFunction) {
   try {
-    const id = parseInt(req.params.id);
-    await projectService.delete(id);
+    const id = parseInt(req.params.id as string, 10);
+    await projectService.deleteProject(id);
     res.status(204).send();
   } catch (error) {
     next(error);
@@ -58,7 +56,7 @@ export async function deleteProject(req: Request, res: Response, next: NextFunct
 
 export async function getModules(req: Request, res: Response, next: NextFunction) {
   try {
-    const projectId = parseInt(req.params.id);
+    const projectId = parseInt(req.params.id as string, 10);
     const modules = await projectService.getModules(projectId);
     res.json(modules);
   } catch (error) {
@@ -68,7 +66,7 @@ export async function getModules(req: Request, res: Response, next: NextFunction
 
 export async function createModule(req: Request, res: Response, next: NextFunction) {
   try {
-    const projectId = parseInt(req.params.id);
+    const projectId = parseInt(req.params.id as string, 10);
     const moduleData = { ...req.body, projectId };
     const module = await projectService.createModule(moduleData);
     res.status(201).json(module);

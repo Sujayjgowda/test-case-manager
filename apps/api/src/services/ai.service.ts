@@ -2,32 +2,15 @@ import OpenAI from 'openai';
 import { prisma } from '../index.js';
 import { NotFoundError } from '../middleware/error-handler.js';
 
-// In-memory job storage (use Redis/Bull in production)
-const generationJobs = new Map<
-  string,
-  {
-    id: string;
-    scenarioId: number;
-    status: 'queued' | 'processing' | 'completed' | 'failed';
-    prompt?: string;
-    options?: Record<string, unknown>;
-    testCases?: unknown[];
-    error?: string;
-    createdAt: Date;
-    completedAt?: Date;
-  }
->();
+// ─── SambaNova Client ────────────────────────────────────────────────────────
 
-let jobIdCounter = 0;
-
-function generateJobId(): string {
-  return `job_${Date.now()}_${++jobIdCounter}`;
-}
-
-// Lazy client — reads key fresh on each call so .env changes are always picked up
-function getSambaNovaClient() {
+function getSambaNovaClient(): OpenAI {
   const apiKey = process.env.SAMBANOVA_API_KEY;
-  if (!apiKey) throw new Error('SAMBANOVA_API_KEY is not set in environment variables');
+  if (!apiKey) {
+    throw new Error(
+      'SAMBANOVA_API_KEY is not configured. Set it in your .env file to enable AI test script generation.'
+    );
+  }
 
   return new OpenAI({
     apiKey,
@@ -35,329 +18,221 @@ function getSambaNovaClient() {
   });
 }
 
-async function callAI(prompt: string): Promise<string> {
-  const client = getSambaNovaClient();
-  const models = ['Meta-Llama-3.3-70B-Instruct', 'gemma-4-31B-it'];
+// ─── Core AI Call ────────────────────────────────────────────────────────────
 
-  let lastError: any = null;
-  for (const model of models) {
+const SAMBANOVA_MODELS = [
+  'gemma-4-31B-it',
+  'MiniMax-M3',
+  'Meta-Llama-3.3-70B-Instruct',
+  'DeepSeek-V3.1',
+];
+
+async function callSambaNova(systemPrompt: string, userPrompt: string): Promise<string> {
+  const client = getSambaNovaClient();
+  let lastError: unknown = null;
+
+  for (const model of SAMBANOVA_MODELS) {
     try {
       const completion = await client.chat.completions.create({
         model,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.1,
-        max_tokens: 3072,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.15,
+        max_tokens: 3000,
       });
 
       const content = completion.choices[0]?.message?.content;
       if (content) return content;
-    } catch (err: any) {
+    } catch (err: unknown) {
       lastError = err;
-      console.warn(`SambaNova model ${model} attempt failed: ${err.message}`);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.warn(`[SambaNova] Model "${model}" failed: ${errMsg}`);
     }
   }
 
-  throw lastError || new Error('SambaNova AI call failed');
+  throw lastError instanceof Error
+    ? lastError
+    : new Error('All SambaNova AI models failed. Check your API key and network connection.');
 }
 
+// ─── JSON Extraction ─────────────────────────────────────────────────────────
+
 function extractJSON(text: string): string {
+  // Try fenced code block first
   const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (fenceMatch) return fenceMatch[1].trim();
+
+  // Try to find a JSON object directly
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (jsonMatch) return jsonMatch[0].trim();
+
   return text.trim();
 }
 
-// --- Domain-Aware Fallback Generators ---
-
-function generateFallbackTestCases(
-  scenario: any,
-  prompt?: string,
-  options?: Record<string, unknown>
-) {
-  const title = scenario.title || 'Test Scenario';
-  const desc = scenario.description || title;
-  const preconditions = scenario.preconditions || 'System operational and prerequisites met';
-  const expectedOutcome = scenario.expectedOutcome || 'Operation executes and state is verified';
-  const moduleName = scenario.module?.name || 'General Module';
-
-  return [
-    {
-      title: `${title} - Positive / Standard Workflow Verification`,
-      description: `Validate end-to-end execution of "${title}" under standard operational conditions.`,
-      preConditions: preconditions,
-      postConditions: expectedOutcome,
-      priority: 'high',
-      steps: [
-        {
-          stepNumber: 1,
-          description: `Access the ${moduleName} module within the application dashboard.`,
-          expectedResult: `Module interface loads successfully with all navigation tabs and action controls accessible.`,
-        },
-        {
-          stepNumber: 2,
-          description: `Verify that system preconditions are active: "${preconditions}".`,
-          expectedResult: `Initial state confirms required records, configurations, or privileges are available.`,
-        },
-        {
-          stepNumber: 3,
-          description: `Initiate the transaction for "${title}" and input all valid mandatory parameters.`,
-          expectedResult: `All form inputs accept data without formatting errors or inline validation flags.`,
-        },
-        {
-          stepNumber: 4,
-          description: `Submit and execute the action, observing client-side request dispatch.`,
-          expectedResult: `System shows progress/processing indicator and submits payload without timeout.`,
-        },
-        {
-          stepNumber: 5,
-          description: `Confirm primary business outcome: "${expectedOutcome}".`,
-          expectedResult: `Success notification appears and record status updates to confirmed/active.`,
-        },
-        {
-          stepNumber: 6,
-          description: `Verify system audit log and persisted record consistency in database/storage.`,
-          expectedResult: `Activity log documents the event with timestamp, user ID, and unchanged attributes.`,
-        },
-      ],
-    },
-    {
-      title: `${title} - Negative Flow: Mandatory Field & Missing Input Validation`,
-      description: `Ensure the system prevents submission and enforces validation when required inputs are omitted.`,
-      preConditions: preconditions,
-      postConditions: `No invalid or partial transaction records are committed to the system.`,
-      priority: 'high',
-      steps: [
-        {
-          stepNumber: 1,
-          description: `Open the entry form for "${title}".`,
-          expectedResult: `Form loads with mandatory indicators (asterisks or highlights) visible.`,
-        },
-        {
-          stepNumber: 2,
-          description: `Leave mandatory fields blank and trigger the submit/save action.`,
-          expectedResult: `Submission is rejected with field-level inline error messages displayed.`,
-        },
-        {
-          stepNumber: 3,
-          description: `Verify that form state retains focus on the first invalid field and no server record is generated.`,
-          expectedResult: `System prevents persistence and maintains clean state.`,
-        },
-      ],
-    },
-    {
-      title: `${title} - Boundary & Limit Verification`,
-      description: `Test system handling of boundary characters, maximum field lengths, and extreme parameter values.`,
-      preConditions: preconditions,
-      postConditions: `Inputs exceeding limits are either gracefully truncated or rejected with clear feedback.`,
-      priority: 'medium',
-      steps: [
-        {
-          stepNumber: 1,
-          description: `Navigate to "${title}" entry screen and enter inputs with maximum allowed boundary lengths.`,
-          expectedResult: `System enforces maximum length constraints or indicators without crashing.`,
-        },
-        {
-          stepNumber: 2,
-          description: `Enter special characters, unicode strings, and whitespace variations in descriptive fields.`,
-          expectedResult: `System handles special formatting properly with sanitization.`,
-        },
-        {
-          stepNumber: 3,
-          description: `Execute submission and verify stored string representation.`,
-          expectedResult: `Data is stored accurately without injection errors or truncation corruption.`,
-        },
-      ],
-    },
-    {
-      title: `${title} - Access Control & Role-Based Permissions`,
-      description: `Verify that unauthorized or read-only users cannot perform or modify "${title}".`,
-      preConditions: `User logged in with restricted / non-privileged role.`,
-      postConditions: `Restricted operations remain protected and unauthorized actions are blocked.`,
-      priority: 'high',
-      steps: [
-        {
-          stepNumber: 1,
-          description: `Attempt to access the action controls for "${title}" using a restricted account.`,
-          expectedResult: `Action buttons are disabled or hidden based on RBAC rules.`,
-        },
-        {
-          stepNumber: 2,
-          description: `Attempt direct URL or API execution for the protected endpoint.`,
-          expectedResult: `Server returns HTTP 403 Forbidden with access denial log recorded.`,
-        },
-      ],
-    },
-    {
-      title: `${title} - Error Recovery & Concurrency Handling`,
-      description: `Verify system resiliency when double-submitting or facing transient network interruptions.`,
-      preConditions: preconditions,
-      postConditions: `Idempotency is maintained; no duplicate entries created.`,
-      priority: 'medium',
-      steps: [
-        {
-          stepNumber: 1,
-          description: `Trigger the submission action for "${title}" rapidly twice (double click test).`,
-          expectedResult: `System disables the submit button on first click to prevent duplicate submissions.`,
-        },
-        {
-          stepNumber: 2,
-          description: `Verify database records for duplicate entries.`,
-          expectedResult: `Exactly one transaction is created and confirmed.`,
-        },
-      ],
-    },
-  ];
-}
-
-function generateFallbackStepsForScenario(data: {
-  scenarioTitle: string;
-  scenarioDescription?: string;
-  preconditions?: string;
-  expectedOutcome?: string;
-  additionalInstructions?: string;
-  environment?: 'argus' | 'lsmv';
-}) {
-  const { scenarioTitle, scenarioDescription, preconditions, expectedOutcome, environment = 'argus' } = data;
-
-  const isLsmv = environment === 'lsmv' ||
-    scenarioTitle.toLowerCase().includes('lsmv') ||
-    (scenarioDescription || '').toLowerCase().includes('lsmv') ||
-    scenarioTitle.toLowerCase().includes('literature');
-
-  if (isLsmv) {
-    return {
-      title: scenarioTitle,
-      description: scenarioDescription || `LSMV Literature Screening & Medical Valuation: ${scenarioTitle}`,
-      preConditions: preconditions || 'LSMV Literature Intake queue configured; user authenticated with Screener/Medical Evaluator role.',
-      postConditions: expectedOutcome || 'Literature citation triaged, 4 ICSR criteria evaluated, and record disposition updated.',
-      environment: 'lsmv',
-      steps: [
-        {
-          stepNumber: 1,
-          description: 'Log into the LSMV (Literature Screening & Medical Valuation) application worklist.',
-          expectedResult: 'LSMV dashboard displays unreviewed literature batches and citation counts.',
-        },
-        {
-          stepNumber: 2,
-          description: 'Navigate to Literature Triage Queue and filter by search strategy feed (PubMed / Embase).',
-          expectedResult: 'Target citation list is displayed with Title, Abstract, Source Journal, and PMID / DOI.',
-        },
-        {
-          stepNumber: 3,
-          description: 'Select target article row to open the LSMV Citation Evaluation viewer.',
-          expectedResult: 'Article metadata pane, Abstract tab, and Full-Text viewer render without error.',
-        },
-        {
-          stepNumber: 4,
-          description: 'Execute duplicate citation cross-check against existing records in LSMV database.',
-          expectedResult: 'Duplicate screening engine compares DOI/title and displays match score.',
-        },
-        {
-          stepNumber: 5,
-          description: 'Evaluate the 4 mandatory ICSR minimum criteria: Identifiable Reporter, Identifiable Patient, Suspect Product, and Adverse Event.',
-          expectedResult: 'Screener checklist reflects compliance for all 4 ICSR criteria or flags missing elements.',
-        },
-        {
-          stepNumber: 6,
-          description: 'Access the Full-Text PDF Viewer tab and review full journal publication.',
-          expectedResult: 'High-resolution PDF opens with text search and annotation capabilities active.',
-        },
-        {
-          stepNumber: 7,
-          description: 'Highlight and annotate adverse event narrative, patient demographics, and dosage regimens.',
-          expectedResult: 'Clinical annotations saved and linked to structured extraction fields in LSMV.',
-        },
-        {
-          stepNumber: 8,
-          description: 'Route citation to Medical Valuation tab for physician review (Special Situations / Off-Label / Causality).',
-          expectedResult: 'Medical Evaluator assessment section unlocks for clinical comments and sign-off.',
-        },
-        {
-          stepNumber: 9,
-          description: 'Assign final screening disposition: "Potential ICSR" or "Non-ICSR / No Safety Signal".',
-          expectedResult: 'Triage disposition badge updates with reason code recorded in audit trail.',
-        },
-        {
-          stepNumber: 10,
-          description: 'For Potential ICSRs, trigger Export to Safety Database (Oracle Argus Safety Intake Queue).',
-          expectedResult: 'LSMV transmits bibliographic metadata, abstract, and PDF attachment to safety intake queue.',
-        },
-        {
-          stepNumber: 11,
-          description: 'Verify LSMV audit log and transmission status.',
-          expectedResult: 'Audit log reflects user ID, timestamp, disposition decision, and transmission confirmation.',
-        },
-      ],
-    };
+function parseAIResponse<T>(raw: string): T {
+  const jsonStr = extractJSON(raw);
+  try {
+    return JSON.parse(jsonStr) as T;
+  } catch {
+    throw new Error(
+      `Failed to parse AI response as JSON. Raw output:\n${raw.substring(0, 500)}`
+    );
   }
-
-  // Oracle Argus Safety dedicated steps
-  return {
-    title: scenarioTitle,
-    description: scenarioDescription || `Oracle Argus Safety: ${scenarioTitle}`,
-    preConditions: preconditions || 'Oracle Argus Safety enterprise database active; user logged in with Case Processor role.',
-    postConditions: expectedOutcome || 'Case processed in Argus Safety, validated, locked with 21 CFR Part 11 signature, and submitted.',
-    environment: 'argus',
-    steps: [
-      {
-        stepNumber: 1,
-        description: 'Log into Oracle Argus Safety application using authorized Case Processor credentials.',
-        expectedResult: 'Argus Safety home portal loads displaying Personal Worklist and Case Intake queue.',
-      },
-      {
-        stepNumber: 2,
-        description: 'Navigate to Case Actions > BookIn and select Initial Case Book-in.',
-        expectedResult: 'Argus BookIn window opens with Report Type, Country, and Receipt Date fields populated.',
-      },
-      {
-        stepNumber: 3,
-        description: 'Execute mandatory Duplicate Search by entering patient initials, adverse event, and suspect drug.',
-        expectedResult: 'Duplicate search grid confirms no existing matching cases in the Argus database.',
-      },
-      {
-        stepNumber: 4,
-        description: 'Enter General Tab details: Primary Reporter information, Healthcare Professional flag, and Receipt Date.',
-        expectedResult: 'Reporter details validated and saved to Argus General tab.',
-      },
-      {
-        stepNumber: 5,
-        description: 'Navigate to Patient Tab and record Demographics (Age, Gender, Weight) and Medical History.',
-        expectedResult: 'Patient identifiers stored with privacy masking according to enterprise configuration.',
-      },
-      {
-        stepNumber: 6,
-        description: 'Navigate to Products Tab and enter Suspect Product name, dosage formulation, and indication.',
-        expectedResult: 'Product selected from Argus Company Product Dictionary with WHO-DD link established.',
-      },
-      {
-        stepNumber: 7,
-        description: 'Navigate to Events Tab, enter verbatim adverse event term, and trigger MedDRA Auto-Coding.',
-        expectedResult: 'MedDRA coding engine resolves term to LLT, PT, and displays primary SOC hierarchy.',
-      },
-      {
-        stepNumber: 8,
-        description: 'Navigate to Analysis Tab to perform Listedness determination against CCDS and record Causality assessment.',
-        expectedResult: 'Listedness auto-populates as Unlisted/Listed and physician causality score is recorded.',
-      },
-      {
-        stepNumber: 9,
-        description: 'Click "ICSR Validation" button to execute comprehensive validation checks.',
-        expectedResult: 'Argus validation window displays "0 Errors, 0 Warnings" confirming E2B(R3) conformance.',
-      },
-      {
-        stepNumber: 10,
-        description: 'Execute Case Lock under Case Actions > Case Lock with 21 CFR Part 11 electronic signature authentication.',
-        expectedResult: 'Case status changes to "Locked", all form fields become read-only, and audit trail logs signature.',
-      },
-      {
-        stepNumber: 11,
-        description: 'Generate E2B(R3) electronic report and transmit to health authority gateway (FDA FAERS / EMA).',
-        expectedResult: 'E2B(R3) XML generated, transmitted via B2B gateway, and positive MDN ACK (Code 01) captured.',
-      },
-    ],
-  };
 }
 
-// --- Main Service Functions ---
+// ─── System Prompts ──────────────────────────────────────────────────────────
+
+// ─── System Prompts ──────────────────────────────────────────────────────────
+
+const PHARMA_SYSTEM_PROMPT = `You are a Principal QA Validation Engineer and Pharmacovigilance Subject Matter Expert with comprehensive mastery of Oracle Argus Safety (Release 8.4) and LSMV (Literature Screening & Medical Valuation).
+
+================================================================================
+ORACLE ARGUS SAFETY 8.4 — ARCHITECTURE, LOOK & FEEL, AND WORKFLOW SPECIFICATION:
+================================================================================
+
+1. UI LOOK & FEEL, NAVIGATION & SHORTCUTS:
+- Supported resolution: Minimum 1280 x 1024, zoom 100%. Pop-up blocker disabled.
+- Home Page: Personal Argus Status page (Checkboxes: Cases Assigned, Contact Log Entries, Action Item Entries, Overdue Action Items).
+- Quick Launch Toolbar (Top Right Icons):
+  * New Case from Image (create case from image)
+  * New Case (Initial Case Entry dialog)
+  * Open Case (Case Search dialog)
+  * Close Case
+  * Print Case (Case Form print dialog)
+  * Save Case
+  * Forward Case / Return Case (Case Routing dialog)
+  * Worklist (Worklist - New / Open)
+  * Lock Case (Case Lock/Unlock dialog for Local PRPT / globally locked case)
+  * Local Lock (toggle icon for Local Lock / Local Unlock for Japan PRPT)
+  * Medical Review (Medical Review - Case Form dialog)
+  * Coding Review (Coding Review dialog)
+  * Draft Report (View Draft pop-up with Report Form, Destination, Product)
+  * ICSR Check (prints DTD Length Check Warnings & DTD Validation)
+  * Validation Check (executes case validation)
+- Field Validation Icons & Overrides:
+  * Red flag icon: Mandatory field validation failed — case CANNOT be saved until corrected.
+  * Orange flag icon: Optional validation failed — user must click icon, enter justification (or choose standard reason) in Field Justification dialog, turning icon to green.
+- Date Formats: DDMMMYYYY (e.g., 10OCT2026), DDMMMYY, DDMMYYYY with '.', '-', or '/' separators. Partial dates supported where permitted.
+- Null Flavor (NF) Button: ICH E2B(R3) missing data reasons (MSK, UNK, NA, etc.). NF button background turns blue when active; warns user if existing data is cleared.
+- Dynamic Workflow Indicator: Traffic light icon (Green: good standing; Yellow: danger of exceeding; Red: timing exceeded with negative time displayed in red).
+- Keyboard Shortcuts:
+  * CTRL+SHIFT+#: Jump to tab (1=General, 2=Patient, 3=Products, 4=Events, etc.)
+  * ALT+SHIFT+#: Jump to sub-tab/entity (ALT+SHIFT+1 to ALT+SHIFT+0 for entities 1-10)
+  * Double-click field label: Field-level context help
+  * Tab / Case Save: Triggers autocalculation (e.g., daily dose, duration, latencies)
+
+2. CASE CREATION & BOOK-IN WORKFLOW:
+- Navigation: Case Actions > New OR Worklist > Intake.
+- Initial Case Entry / Book-In Dialog:
+  * Initial Receipt Date: Complete date company became aware (mandatory, no partial dates).
+  * Central Receipt Date: Date received by Central Safety.
+  * Country of Incidence: Country where event occurred.
+  * Report Type: Spontaneous, Sponsored Trial, Literature, Other.
+  * Clinical Trial fields: Study ID & Center ID via Clinical Trial Selection dialog (search Project/Study/Center).
+  * Initial Justification: Click green dot to select pre-configured standard justification.
+  * Product Name: Trade Name Product Lookup dialog (populates Product Name, Generic Name, licenses).
+  * Description as Reported: Verbatim event description (icon opens MedDRA hierarchy dialog).
+  * Onset Date/Time: Event onset.
+  * Duplicate Search / Receipt Range Limits:
+    - No date: -90 days to +2 days from System Date
+    - Full Onset Date: -10 days to +90 days
+    - Full Initial Receipt Date: -60 days to +60 days
+  * Reported Causality & Seriousness Criteria checkboxes (Death, Hospitalization, Life Threatening, Disability, Congenital Anomaly, Other).
+  * Attachments and References: File attachment up to 4GB, URL reference, Documentum link.
+  * BookIn Action: Click BookIn button (generates Case ID). System prompts: "Do you want to enter case data now?" (Yes = opens Case Form, No = saves and closes).
+
+3. CASE FORM TABS & FIELD-LEVEL DATA ENTRY:
+- GENERAL TAB:
+  * Study Information: Project ID, Study Phase, Blinding Status (Blinded, Not Blinded, Broken by Sponsor/Investigator), Unblinding Date.
+  * Reporter Information: Add up to 100 reporters; Primary Reporter displayed in blue tab; "Protect Confidentiality" checkbox masks name/address with "NAME AND ADDRESS WITHHELD" and sets MSK null flavor for eVAERS.
+  * Literature Information: Journal and/or Title lookup.
+  * Follow-ups/Amendments: Add up to 500 entries; Significant F/U checkbox; Data Clean up version checkbox (for Data Lock Point versioning).
+- PATIENT TAB:
+  * "Patient Info From Reporter" button copies reporter details if patient is reporter.
+  * Patient Demographics: Initials/Name (transferred from book-in), Pat. ID (for trials), DOB, Age, Gender.
+  * Current Medical Status: Captures history/conditions (mapped to German BfArM tab).
+  * Pregnancy Information: Enabled if Gender=Female and Pregnant=Yes (Gestation period & unit, Number of fetus, Prospective vs Retrospective, Neonate details).
+  * Patient Death Details: Autopsy Done? (Yes/No/Unk), Autopsy Results Available?, Cause of Death rows (up to 50 entries).
+  * Other Relevant History: Past drugs (WHO Drug encoded), Medical conditions (MedDRA encoded), Start/Stop dates, Ongoing flag.
+  * Lab Data: Add Test Name / Lab Test Group (up to 1500 lab records, Norm Low/High, Results/Units, Qualitative Assessment).
+  * Parent Information tab for maternal/paternal exposure cases.
+- PRODUCTS TAB:
+  * Product Lookup: Company Product Browser (Ingredient, Family, Product Name, Trade Name) OR WHO Drug Browser (WHO-DD B or C format, wildcard %, Full Search).
+  * Product Type: Suspect, Concomitant, Treatment/Other.
+  * Indications: Reported Indication & Coded Indication (MedDRA).
+  * Quality Control (QC): QC Safety Date, Cross Reference, CID #, PCID #, Lot Number (auto-creates QC follow-up action item assigned to user).
+  * Dosage Regimens: Start/Stop Date/Time, Ongoing checkbox (clears Stop Date & duration), Frequency, Daily Dosage, Regimen Dosage, Duration of Regimen.
+  * Product Details: First Dose, Last Dose, Duration of Administration, Action Taken (Dechallenge, Rechallenge with Pos/Neg/UNK and start/stop dates), Gestation Period at Exposure (First Dose - LMP Date).
+  * Specialized FDA Categories: Abuse, Counterfeit, Medication error, Misuse, Occupational exposure, Off label use, Overdose, Tampering (Additional Information on Drug G.k.10.r in E2B(R3)).
+  * Device Information: Catalog #, Implant/Explant facility, UDI System (GS1, HIBCC, ICCBBA), UDI-DI, UDI-PI, FDA Exemption Number, IMDRF Code, Malfunction Type (21 CFR Part 803), MIR Report Type.
+  * Vaccine Information: VAERS Form-1 block, Route of admin, Anatomical location.
+- EVENTS TAB:
+  * Description as Reported (verbatim) copied to Description to be Coded.
+  * MedDRA Coding: Autocoding via Alt+Tab or MedDRA Browser (% wildcard). 5 hierarchy levels: SOC > HLGT > HLT > PT > LLT. Yellow highlight = primary SOC path; Asterisk (*) = non-current term. Standard MedDRA Queries (SMQs).
+  * Seriousness Criteria: Death (opens Death Details), Hospitalization (opens Hospitalization Details), Life Threatening, Disability, Congenital Anomaly, Other (mandatory explanatory text).
+  * Diagnosis-Event Relationships: Group symptoms under diagnosis using Move Up/Down (CIOMS I formatted).
+  * Event Assessment Tab: Product-Event pair matrix. Causality as Reported (Investigator), Causality as Determined (Sponsor/MAH), Listedness against Datasheet (Listed/Unlisted), Recalculate button.
+- ANALYSIS TAB:
+  * MedWatch 3500A Info: Block B (Adverse Event / Product Problem), Block C (Suspect Meds), Block F (UF/Distributor info, MDR Contact person), Block G (Report sources).
+  * BfArM 643 Info & AFSSAPS Info.
+  * Case Analysis: Clinical narrative, Show Difference button (strikethrough red text = removed, green highlight = added between locked revisions).
+- ACTIVITIES TAB:
+  * Case Routing: Route to Next State or Return to previous state with password, routing justification, and comments.
+  * Case Locking/Unlocking: Global Lock, Local Lock (Japan PRPT), Unlock with password and reason (Significant F/U vs Non-significant F/U selection). Formally Close Case (final stage before archiving).
+  * Contact Log: Generate Custom Letter Templates, track correspondence, action items.
+  * Action Items: S/U/R status, Action Item Code, Group/Responsibility, Open Date, Due Date, Completed Date.
+
+4. REGULATORY REPORTING & COMPLIANCE (ICSRs & PERIODIC):
+- Expedited Reports:
+  * Scheduling: Regulatory Reports > Schedule New Reports (Aware Date, Due Date, Destination, License) OR Auto-Schedule based on reporting rules algorithm.
+  * Report Forms: CIOMS I, US FDA MedWatch 3500A, US FDA VAERS, French CERFA, Spanish Spontaneous, ICH E2B(R2), ICH E2B(R3).
+  * View Draft: Preview in draft mode (case can be unlocked).
+  * Final Report Generation & Approval: Requires case lock; Route report to Approved state.
+  * Electronic Transmission: Reports Detail Dialog > Transmit tab (E2B EDI gateway, fax, email).
+  * Bulk Operations: Worklist > Bulk Transmit, Bulk Print, Bulk ICSR Transmit.
+  * Incoming ICSRs: Reports > ICSR Pending Reports (Duplicate search, Difference Report: addition=grey, deletion=red, modification=yellow; Accept initial E2B as follow-up).
+- Periodic Reports:
+  * CTPR / DSUR, ICH PSUR / PBRER, US IND Annual, US NDA Periodic.
+  * Line Listings, Summary Tabulations, Data Lock Point (DLP) queries (Last Completed Version vs Next Completed Version with Data Cleaning), As of Reporting.
+
+5. ADVANCED CONDITIONS & MULTI-TENANCY:
+- Advanced Condition Library: Single filter or Query set using logical operators (AND, OR) and set operators (UNION, INTERSECT, MINUS). Case Series (Hit list): Find Now, Store Case Series, CSV Export, XLS/TXT Import (1000 cases/60 sec).
+- Multi-tenancy: Global Portal Homepage (GHP), Enterprise ID, Global Worklists (Individual, Group, All).
+
+================================================================================
+CRITICAL RULES FOR TEST SCRIPT GENERATION:
+================================================================================
+1. ALWAYS respond with valid JSON only — no markdown fences, no explanatory text.
+2. In Oracle Argus Safety test scripts, use the exact menu paths, tab names, dialog names, field labels, keyboard shortcuts, validation icons (red/orange/green), and lock states from the specification above.
+3. Every test step must include:
+   - Precise user action (e.g., "Navigate to Case Actions > New", "Enter '10OCT2026' in Initial Receipt Date", "Press Alt+Tab in Description as Reported to trigger MedDRA auto-coding").
+   - Concrete, verifiable expected result (e.g., "System displays Initial Case Entry dialog with mandatory fields flagged with a red icon", "Term codes to PT: Nausea, SOC: Gastrointestinal disorders").
+4. Never generate generic or vague steps. Always reference Argus 8.4 UI mechanisms.`;
+
+// ─── In-Memory Job Queue ─────────────────────────────────────────────────────
+
+interface GenerationJob {
+  id: string;
+  scenarioId: number;
+  status: 'queued' | 'processing' | 'completed' | 'failed';
+  prompt?: string;
+  options?: Record<string, unknown>;
+  testCases?: unknown[];
+  error?: string;
+  createdAt: Date;
+  completedAt?: Date;
+}
+
+const generationJobs = new Map<string, GenerationJob>();
+let jobCounter = 0;
+
+function createJobId(): string {
+  return `job_${Date.now()}_${++jobCounter}`;
+}
+
+// ─── Generate Test Cases for a Scenario ──────────────────────────────────────
 
 export async function generateTestCases(
   scenarioId: number,
@@ -368,20 +243,15 @@ export async function generateTestCases(
     where: { id: scenarioId },
     include: {
       module: {
-        include: {
-          project: true,
-        },
+        include: { project: true },
       },
     },
   });
 
-  if (!scenario) {
-    throw new NotFoundError('Scenario');
-  }
+  if (!scenario) throw new NotFoundError('Scenario');
 
-  const jobId = generateJobId();
+  const jobId = createJobId();
 
-  // Create job
   generationJobs.set(jobId, {
     id: jobId,
     scenarioId,
@@ -391,267 +261,191 @@ export async function generateTestCases(
     createdAt: new Date(),
   });
 
-  // Start async processing
-  processGeneration(jobId, scenario, prompt, options).catch((err) => {
-    console.error('Generation error:', err);
+  // Fire-and-forget async processing
+  processTestCaseGeneration(jobId, scenario, prompt, options).catch((err) => {
+    console.error('[AI Service] Generation failed:', err);
     const job = generationJobs.get(jobId);
     if (job) {
       job.status = 'failed';
-      job.error = err.message;
+      job.error = err instanceof Error ? err.message : String(err);
       job.completedAt = new Date();
-      generationJobs.set(jobId, job);
     }
   });
 
   return {
     jobId,
     status: 'queued',
-    estimatedCompletion: '5-15 seconds',
+    estimatedCompletion: '10-30 seconds',
   };
 }
 
-async function processGeneration(
+async function processTestCaseGeneration(
   jobId: string,
   scenario: any,
   prompt?: string,
   options?: Record<string, unknown>
 ) {
-  // Update job status
   const job = generationJobs.get(jobId);
-  if (job) {
-    job.status = 'processing';
-    generationJobs.set(jobId, job);
-  }
+  if (job) job.status = 'processing';
 
-  // Build AI prompt
-  const aiPrompt = buildGenerationPrompt(scenario, prompt, options);
-
-  let testCases: any[] = [];
-
-  try {
-    const rawText = await callAI(aiPrompt);
-    const result = JSON.parse(extractJSON(rawText));
-    testCases = result.testCases || [];
-  } catch (aiErr: any) {
-    console.warn(`[AI Service] AI generation failed (${aiErr.message}), activating smart fallback generator.`);
-    testCases = generateFallbackTestCases(scenario, prompt, options);
-  }
-
-  if (!testCases || testCases.length === 0) {
-    testCases = generateFallbackTestCases(scenario, prompt, options);
-  }
-
-  try {
-    // Create test cases in database
-    const createdTestCases = await Promise.all(
-      testCases.map((tc: any) =>
-        prisma.testCase.create({
-          data: {
-            scenarioId: scenario.id,
-            title: tc.title,
-            description: tc.description || '',
-            preConditions: tc.preConditions || '',
-            postConditions: tc.postConditions || '',
-            priority: tc.priority || 'medium',
-            status: 'draft',
-            aiGenerated: true,
-            aiPrompt: prompt || null,
-            testData: tc.testData ? JSON.stringify(tc.testData) : null,
-          },
-        })
-      )
-    );
-
-    // Create steps for each test case
-    for (const tc of createdTestCases) {
-      const originalTc = testCases.find((t: any) => t.title === tc.title);
-      if (originalTc?.steps) {
-        for (const step of originalTc.steps) {
-          await prisma.testStep.create({
-            data: {
-              testCaseId: tc.id,
-              stepNumber: step.stepNumber,
-              description: step.description,
-              expectedResult: step.expectedResult,
-            },
-          });
-        }
-      }
-    }
-
-    // Update job status
-    const completedJob = generationJobs.get(jobId);
-    if (completedJob) {
-      completedJob.status = 'completed';
-      completedJob.testCases = createdTestCases;
-      completedJob.completedAt = new Date();
-      generationJobs.set(jobId, completedJob);
-    }
-  } catch (dbError: any) {
-    throw new Error(`Failed to save generated test cases: ${dbError.message}`);
-  }
-}
-
-function buildGenerationPrompt(
-  scenario: any,
-  prompt?: string,
-  options?: Record<string, unknown>
-): string {
   const { includeNegativeCases, includeEdgeCases, numberOfCases = 5 } = options || {};
 
-  return `You are an expert QA engineer. Generate comprehensive test cases for the following scenario:
+  const userPrompt = `Generate ${numberOfCases} comprehensive test cases for the following pharmacovigilance scenario:
 
-**Project:** ${scenario.module.project.name}
-**Module:** ${scenario.module.name}
-**Scenario:** ${scenario.title}
-**Description:** ${scenario.description || 'No description provided'}
-**Preconditions:** ${scenario.preconditions || 'None specified'}
-**Expected Outcome:** ${scenario.expectedOutcome || 'Not specified'}
+PROJECT: ${scenario.module.project.name}
+MODULE: ${scenario.module.name}
+SCENARIO: ${scenario.title}
+DESCRIPTION: ${scenario.description || 'Not provided'}
+PRECONDITIONS: ${scenario.preconditions || 'None specified'}
+EXPECTED OUTCOME: ${scenario.expectedOutcome || 'Not specified'}
 
-Requirements:
-- Generate ${numberOfCases} test cases
-${includeNegativeCases ? '- Include negative test cases (invalid inputs, error conditions)' : ''}
+REQUIREMENTS:
+- Generate exactly ${numberOfCases} test cases
+${includeNegativeCases ? '- Include negative test cases (invalid inputs, error conditions, access violations)' : ''}
 ${includeEdgeCases ? '- Include edge cases and boundary conditions' : ''}
-- Include clear, actionable steps for each test case
-- Include expected results for each step
-- Cover happy path, alternative flows, and error scenarios
+- Each test case must have 8-15 detailed steps
+- Cover the complete workflow: navigation, data entry, validation, and outcome verification
+- Include regulatory compliance checkpoints
+${prompt ? `\nADDITIONAL INSTRUCTIONS: ${prompt}` : ''}
 
-${prompt ? `Additional instructions: ${prompt}` : ''}
-
-Format the response as JSON with this exact structure (no markdown, no extra text):
+Respond with this exact JSON structure:
 {
   "testCases": [
     {
-      "title": "Clear, descriptive title",
-      "description": "Brief description of what this test validates",
-      "preConditions": "Any preconditions needed",
-      "postConditions": "Expected state after test",
+      "title": "Descriptive test case title",
+      "description": "What this test validates",
+      "preConditions": "Required preconditions",
+      "postConditions": "Expected state after test completion",
       "priority": "high|medium|low",
       "steps": [
         {
           "stepNumber": 1,
-          "description": "Action to perform",
-          "expectedResult": "Expected outcome"
+          "description": "Precise action to perform",
+          "expectedResult": "Specific, verifiable expected outcome"
         }
       ]
     }
   ]
-}
+}`;
 
-Respond ONLY with valid JSON, no additional text.`;
-}
+  const rawResponse = await callSambaNova(PHARMA_SYSTEM_PROMPT, userPrompt);
+  const parsed = parseAIResponse<{ testCases: any[] }>(rawResponse);
 
-export async function getGenerationStatus(scenarioId: number) {
-  const jobs = Array.from(generationJobs.values())
-    .filter((j) => j.scenarioId === scenarioId)
-    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-
-  if (jobs.length === 0) {
-    return { status: 'no_jobs' };
+  if (!parsed.testCases || parsed.testCases.length === 0) {
+    throw new Error('AI returned empty test cases array');
   }
 
-  const job = jobs[0];
-  return {
-    jobId: job.id,
-    status: job.status,
-    error: job.error,
-    testCases: job.testCases,
-    createdAt: job.createdAt,
-    completedAt: job.completedAt,
-  };
-}
+  // Persist to database
+  const createdTestCases = await Promise.all(
+    parsed.testCases.map((tc: any) =>
+      prisma.testCase.create({
+        data: {
+          scenarioId: scenario.id,
+          title: tc.title,
+          description: tc.description || '',
+          preConditions: tc.preConditions || '',
+          postConditions: tc.postConditions || '',
+          priority: tc.priority || 'medium',
+          status: 'draft',
+          aiGenerated: true,
+          aiPrompt: prompt || null,
+          testData: tc.testData ? JSON.stringify(tc.testData) : null,
+        },
+      })
+    )
+  );
 
-export async function getJobStatus(jobId: string) {
-  const job = generationJobs.get(jobId);
-  if (!job) {
-    throw new NotFoundError('Job');
+  // Persist steps for each test case
+  for (const tc of createdTestCases) {
+    const originalTc = parsed.testCases.find((t: any) => t.title === tc.title);
+    if (originalTc?.steps) {
+      for (const step of originalTc.steps) {
+        await prisma.testStep.create({
+          data: {
+            testCaseId: tc.id,
+            stepNumber: step.stepNumber,
+            description: step.description,
+            expectedResult: step.expectedResult,
+          },
+        });
+      }
+    }
   }
 
-  return {
-    id: job.id,
-    scenarioId: job.scenarioId,
-    status: job.status,
-    error: job.error,
-    testCases: job.testCases,
-    createdAt: job.createdAt,
-    completedAt: job.completedAt,
-  };
+  if (job) {
+    job.status = 'completed';
+    job.testCases = createdTestCases;
+    job.completedAt = new Date();
+  }
 }
+
+// ─── Generate Steps for an Existing Test Case ────────────────────────────────
 
 export async function generateSteps(testCaseId: number, prompt?: string) {
   const testCase = await prisma.testCase.findUnique({
     where: { id: testCaseId },
-    include: {
-      scenario: true,
-    },
+    include: { scenario: true },
   });
 
-  if (!testCase) {
-    throw new NotFoundError('Test case');
-  }
+  if (!testCase) throw new NotFoundError('Test case');
 
-  const aiPrompt = `Generate detailed test steps for the following test case:
+  const userPrompt = `Generate detailed test steps for the following test case:
 
-**Test Case:** ${testCase.title}
-**Description:** ${testCase.description || 'No description'}
-**Scenario:** ${testCase.scenario.title}
+TEST CASE: ${testCase.title}
+DESCRIPTION: ${testCase.description || 'No description'}
+SCENARIO: ${testCase.scenario.title}
+PRECONDITIONS: ${testCase.preConditions || 'None'}
+EXPECTED OUTCOME: ${testCase.postConditions || 'Not specified'}
+${prompt ? `\nADDITIONAL INSTRUCTIONS: ${prompt}` : ''}
 
-${prompt ? `Additional instructions: ${prompt}` : ''}
+Generate 10-15 precise, actionable test steps.
 
-Format as JSON (no markdown, no extra text):
+Respond with this exact JSON structure:
 {
   "steps": [
     {
       "stepNumber": 1,
-      "description": "Step description",
-      "expectedResult": "Expected result"
+      "description": "Precise action to perform",
+      "expectedResult": "Specific, verifiable expected outcome"
     }
   ]
 }`;
 
-  try {
-    const rawText = await callAI(aiPrompt);
-    const result = JSON.parse(extractJSON(rawText));
-    return result.steps || [];
-  } catch (err: any) {
-    console.warn(`[AI Service] AI steps generation failed (${err.message}), using fallback.`);
-    const fallback = generateFallbackStepsForScenario({
-      scenarioTitle: testCase.title,
-      scenarioDescription: testCase.description,
-      preconditions: testCase.preConditions,
-      expectedOutcome: testCase.postConditions,
-    });
-    return fallback.steps;
-  }
+  const rawResponse = await callSambaNova(PHARMA_SYSTEM_PROMPT, userPrompt);
+  const parsed = parseAIResponse<{ steps: any[] }>(rawResponse);
+  return parsed.steps || [];
 }
+
+// ─── Improve an Existing Test Case ───────────────────────────────────────────
 
 export async function improveTestCase(testCaseId: number, instructions: string) {
   const testCase = await prisma.testCase.findUnique({
     where: { id: testCaseId },
     include: {
-      steps: {
-        orderBy: { stepNumber: 'asc' },
-      },
+      steps: { orderBy: { stepNumber: 'asc' } },
       scenario: true,
     },
   });
 
-  if (!testCase) {
-    throw new NotFoundError('Test case');
-  }
+  if (!testCase) throw new NotFoundError('Test case');
 
-  const aiPrompt = `Improve the following test case based on these instructions: "${instructions}"
+  const currentSteps = testCase.steps
+    .map((s) => `Step ${s.stepNumber}: ${s.description} → Expected: ${s.expectedResult}`)
+    .join('\n');
 
-**Current Test Case:**
+  const userPrompt = `Improve the following test case based on these instructions: "${instructions}"
+
+CURRENT TEST CASE:
 Title: ${testCase.title}
 Description: ${testCase.description || 'N/A'}
 Pre-conditions: ${testCase.preConditions || 'N/A'}
 Post-conditions: ${testCase.postConditions || 'N/A'}
+Scenario: ${testCase.scenario.title}
 
-**Current Steps:**
-${testCase.steps.map((s) => `${s.stepNumber}. ${s.description} -> ${s.expectedResult}`).join('\n')}
+CURRENT STEPS:
+${currentSteps || 'No steps defined yet'}
 
-Provide improved version as JSON (no markdown, no extra text):
+Provide the improved version. Respond with this exact JSON structure:
 {
   "title": "Improved title",
   "description": "Improved description",
@@ -666,31 +460,17 @@ Provide improved version as JSON (no markdown, no extra text):
   ]
 }`;
 
-  try {
-    const rawText = await callAI(aiPrompt);
-    return JSON.parse(extractJSON(rawText));
-  } catch (err: any) {
-    console.warn(`[AI Service] AI improve test case failed (${err.message}), using enhanced fallback.`);
-    return {
-      title: `${testCase.title} [Enhanced]`,
-      description: `${testCase.description || ''} (Enhanced: ${instructions})`.trim(),
-      preConditions: testCase.preConditions || 'Standard preconditions satisfied',
-      postConditions: testCase.postConditions || 'Postconditions verified',
-      steps: testCase.steps.length > 0 ? testCase.steps : generateFallbackStepsForScenario({
-        scenarioTitle: testCase.title,
-        scenarioDescription: testCase.description,
-        preconditions: testCase.preConditions,
-        expectedOutcome: testCase.postConditions,
-      }).steps,
-    };
-  }
+  const rawResponse = await callSambaNova(PHARMA_SYSTEM_PROMPT, userPrompt);
+  return parseAIResponse(rawResponse);
 }
+
+// ─── Generate Test Steps from Scenario Input (Standalone) ────────────────────
 
 export async function generateTestStepsFromScenario(data: {
   scenarioTitle: string;
-  scenarioDescription: string;
-  preconditions: string;
-  expectedOutcome: string;
+  scenarioDescription?: string;
+  preconditions?: string;
+  expectedOutcome?: string;
   additionalInstructions?: string;
   environment?: 'argus' | 'lsmv';
 }) {
@@ -703,61 +483,109 @@ export async function generateTestStepsFromScenario(data: {
     environment = 'argus',
   } = data;
 
-  const isLsmv = environment === 'lsmv' ||
+  const isLsmv =
+    environment === 'lsmv' ||
     scenarioTitle.toLowerCase().includes('lsmv') ||
     (scenarioDescription || '').toLowerCase().includes('lsmv') ||
     scenarioTitle.toLowerCase().includes('literature');
 
-  const appGuidance = isLsmv
-    ? `TARGET APPLICATION: LSMV (Literature Screening & Medical Valuation).
-CRITICAL: Generate test steps STRICTLY for LSMV (PubMed/Embase Feed Ingestion, 4-Criteria ICSR Triage [Reporter, Patient, Drug, Event], Duplicate Screening, Full-Text PDF Review, Medical Valuation, QC Audit & Export to Safety DB).
-DO NOT INCLUDE or club Oracle Argus Safety Case Form tabs (BookIn, General, Patient, Product, Events tabs). Keep steps 100% focused on LSMV.`
-    : `TARGET APPLICATION: Oracle Argus Safety.
-CRITICAL: Generate test steps STRICTLY for Oracle Argus Safety (Case Intake/Book-in, Duplicate Detection, General, Patient, Products, Events tabs, MedDRA Auto-Coding, Listedness, WHO Causality, 21 CFR Part 11 Case Lock, E2B-R3 Regulatory Submission).
-DO NOT INCLUDE or club LSMV Literature Triage steps. Keep steps 100% focused on Oracle Argus Safety.`;
+  const appContext = isLsmv
+    ? `TARGET APPLICATION: LSMV (Literature Screening & Medical Valuation)
+Generate test steps STRICTLY for LSMV workflows:
+- PubMed/Embase Feed Ingestion & Citation Import
+- 4-Criteria ICSR Triage (Identifiable Reporter, Identifiable Patient, Suspect Product, Adverse Event)
+- Duplicate Citation Cross-Check (DOI/Title matching)
+- Full-Text PDF Retrieval, Review & Annotation
+- Medical Valuation (Special Situations, Off-Label Use, Pregnancy Exposure, Lack of Efficacy)
+- QC Audit Sign-Off & Export to Safety Database (Oracle Argus Safety Intake Queue)
+DO NOT include Oracle Argus Safety Case Form tabs or workflows.`
+    : `TARGET APPLICATION: Oracle Argus Safety (Release 8.4)
+Generate test steps STRICTLY according to Oracle Argus Safety 8.4 UI, look & feel, and workflows:
+- UI & Look and Feel: 1280x1024 resolution, 100% zoom, Personal Argus Status page (Cases Assigned, Contact Log, Action Items, Overdue Action Items), Quick Launch Toolbar (New Case, Open Case, Save, Forward/Return, Lock Case, Local Lock, Medical Review, Coding Review, Draft Report, ICSR Check, Validation Check).
+- Validation Flags & Overrides: Red flag (mandatory check unmet, cannot save), Orange flag (optional check unmet, click to open Field Justification dialog, turns green upon justification).
+- Data Formatting: Dates in DDMMMYYYY format (e.g. 10OCT2026), Null Flavor (NF) button (ICH E2B(R3) missing data, turns blue when active). Keyboard shortcuts (CTRL+SHIFT+# for tabs, ALT+SHIFT+# for sub-tabs).
+- Case Intake & Book-in: Case Actions > New or Worklist > Intake. Initial Case Entry dialog (Initial Receipt Date, Central Receipt Date, Country of Incidence, Report Type, Study ID/Center ID for trials, Product Name via Trade Name Lookup, Description as Reported verbatim with MedDRA icon, Onset Date/Time).
+- Duplicate Detection: Receipt Range Limits (No date: -90/+2 days; Full Onset: -10/+90 days; Full Initial Receipt: -60/+60 days).
+- General Tab: Study Info (Blinding Status: Blinded/Not Blinded/Broken by Sponsor or Investigator, Unblinding Date), Reporter Info (up to 100 reporters, Primary Reporter blue tab, Protect Confidentiality masks name/address & sets MSK null flavor for eVAERS), Follow-ups/Amendments (Significant F/U, Data Clean up version for DLP).
+- Patient Tab: "Patient Info From Reporter" copy button, Demographics, Current Medical Status (BfArM), Pregnancy Information (Gestation period, Number of fetus, Prospective vs Retrospective, Neonate info), Patient Death Details (Autopsy Done?, Cause of Death up to 50 rows), Other Relevant History (WHO Drug & MedDRA coded), Lab Data (up to 1500 lab tests, Norm Low/High, Assessment).
+- Products Tab: Company Product Browser vs WHO Drug Browser (WHO-DD B or C format, wildcard % search), Product Type (Suspect, Concomitant, Treatment/Other), Indications (Reported Indication, Coded Indication via MedDRA), Quality Control (QC Date, CID #, PCID #, Lot Number, auto-creates QC action item), Dosage Regimens (Start/Stop Date, Ongoing checkbox, Duration of Regimen), Product Details (Dechallenge, Rechallenge, Gestation Period at Exposure = First Dose - LMP Date), Specialized FDA categories (Abuse, Misuse, Off-label, Overdose, Counterfeit, Medication error, Tampering), Device details (UDI-DI/PI, IMDRF Code, Malfunction Type, MIR report type), Vaccine details (VAERS Form-1).
+- Events Tab: Description as Reported verbatim copied to Description to be Coded, MedDRA Auto-Coding (Alt+Tab) or MedDRA Browser (SOC > HLGT > HLT > PT > LLT; yellow highlight = primary SOC; asterisk = non-current), Seriousness criteria (Death, Hospitalization, Life Threatening, Disability, Congenital Anomaly, Other), Diagnosis-Event Relationships (Move Up/Down), Event Assessment matrix (Product-Event pairs, Causality as Reported/Determined, Listedness vs Datasheet, Recalculate button).
+- Analysis Tab: MedWatch 3500A (Blocks B, C, F, G), BfArM 643 Info, AFSSAPS Info, Case Narrative, Show Difference (strikethrough red text = removed, green highlight = added between locked revisions).
+- Activities Tab: Case Routing (Route / Return with password, routing justification, comments), Case Lock / Unlock (Global Lock, Local Lock for Japan PRPT, password re-authentication, Significant vs Non-significant F/U selection), Formally Close Case (final stage before archive).
+- Regulatory Reports: Schedule New Reports (Aware Date, Due Date, Destination, License) or Auto-Schedule, View Draft report, Route to Approved, Transmit ICSR electronically (E2B(R2)/(R3), MedWatch 3500A, VAERS, CIOMS I, Bulk Transmit, Incoming ICSRs with Duplicate Search & Difference Report: Addition=grey, Deletion=red, Modification=yellow).
+- Periodic Reports: CTPR/DSUR, ICH PSUR/PBRER, US IND Annual, US NDA Periodic (Line listings, Summary tabulations, DLP queries, As of Reporting).
+- Advanced Conditions & Multi-tenancy: Advanced Condition Library (AND/OR, UNION/INTERSECT/MINUS), Case Series (Hit list: CSV export, XLS/TXT import 1000 cases/60s), Global Portal Homepage (GHP, Enterprise ID / tenant selection).
+DO NOT include LSMV Literature Triage workflows.`;
 
-  const aiPrompt = `You are an expert QA engineer specializing in Pharmacovigilance and Drug Safety systems validation. Generate detailed test steps for the following test scenario:
+  const userPrompt = `Generate a complete, detailed test script for the following pharmacovigilance scenario:
 
-**Scenario Title:** ${scenarioTitle}
-**Target Environment:** ${isLsmv ? 'LSMV (Literature Screening & Medical Valuation)' : 'Oracle Argus Safety'}
-**Description:** ${scenarioDescription || 'No description provided'}
-**Preconditions:** ${preconditions || 'None specified'}
-**Expected Outcome:** ${expectedOutcome || 'Not specified'}
+SCENARIO TITLE: ${scenarioTitle}
+DESCRIPTION: ${scenarioDescription || 'Not provided'}
+PRECONDITIONS: ${preconditions || 'Standard system preconditions'}
+EXPECTED OUTCOME: ${expectedOutcome || 'Successful completion of workflow'}
 
-${appGuidance}
+${appContext}
 
-${additionalInstructions ? `**Additional Instructions:** ${additionalInstructions}` : ''}
+${additionalInstructions ? `ADDITIONAL INSTRUCTIONS: ${additionalInstructions}` : ''}
 
-Requirements:
-- Generate 10-15 detailed, actionable test steps strictly for this application
-- Each step should have a clear action and expected result
-- Include navigation steps, data entry steps, verification steps, and outcome validation
-- Cover the complete workflow from start to finish
-- Include both positive path and relevant validation checks
+REQUIREMENTS:
+- Generate 10-15 detailed, actionable test steps
+- Each step must have a clear action and a specific, verifiable expected result
+- Follow the exact application workflow sequence
+- Include navigation steps, data entry, validation, and outcome verification
+- Include regulatory compliance checkpoints where applicable
 
-Format the response as JSON (no markdown, no extra text):
+Respond with this exact JSON structure:
 {
   "title": "${scenarioTitle}",
-  "description": "${scenarioDescription || ''}",
-  "preConditions": "${preconditions || ''}",
-  "postConditions": "${expectedOutcome || ''}",
+  "description": "Detailed test script description",
+  "preConditions": "Complete list of preconditions",
+  "postConditions": "Expected state after successful test completion",
   "environment": "${isLsmv ? 'lsmv' : 'argus'}",
   "steps": [
     {
       "stepNumber": 1,
-      "description": "Clear, actionable step description",
+      "description": "Precise, actionable step description",
       "expectedResult": "Specific, verifiable expected outcome"
     }
   ]
+}`;
+
+  const rawResponse = await callSambaNova(PHARMA_SYSTEM_PROMPT, userPrompt);
+  return parseAIResponse(rawResponse);
 }
 
-Respond ONLY with valid JSON, no additional text.`;
+// ─── Job Status ──────────────────────────────────────────────────────────────
 
-  try {
-    const rawText = await callAI(aiPrompt);
-    return JSON.parse(extractJSON(rawText));
-  } catch (aiErr: any) {
-    console.warn(`[AI Service] AI generate-test-steps failed (${aiErr.message}), activating smart fallback.`);
-    return generateFallbackStepsForScenario(data);
-  }
+export async function getGenerationStatus(scenarioId: number) {
+  const jobs = Array.from(generationJobs.values())
+    .filter((j) => j.scenarioId === scenarioId)
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+  if (jobs.length === 0) return { status: 'no_jobs' };
+
+  const job = jobs[0];
+  return {
+    jobId: job.id,
+    status: job.status,
+    error: job.error,
+    testCases: job.testCases,
+    createdAt: job.createdAt,
+    completedAt: job.completedAt,
+  };
+}
+
+export async function getJobStatus(jobId: string) {
+  const job = generationJobs.get(jobId);
+  if (!job) throw new NotFoundError('Job');
+
+  return {
+    id: job.id,
+    scenarioId: job.scenarioId,
+    status: job.status,
+    error: job.error,
+    testCases: job.testCases,
+    createdAt: job.createdAt,
+    completedAt: job.completedAt,
+  };
 }

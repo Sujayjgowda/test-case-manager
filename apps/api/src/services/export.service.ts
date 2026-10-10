@@ -289,7 +289,7 @@ export async function bulkExport(testCaseIds: number[], format: string) {
           });
         });
       });
-      buffer = await workbook.xlsx.writeBuffer();
+      buffer = Buffer.from(await workbook.xlsx.writeBuffer());
       contentType =
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
       break;

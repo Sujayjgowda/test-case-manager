@@ -36,7 +36,7 @@ export async function improveTestCase(req: Request, res: Response, next: NextFun
 
 export async function getGenerationStatus(req: Request, res: Response, next: NextFunction) {
   try {
-    const jobId = req.params.jobId;
+    const jobId = req.params.jobId as string;
     const status = await aiService.getJobStatus(jobId);
     res.json(status);
   } catch (error) {

@@ -61,7 +61,7 @@ export async function create(data: {
   description?: string;
   key: string;
   status?: string;
-  settings?: Record<string, unknown>;
+  settings?: Record<string, unknown> | string;
 }) {
   // Check for duplicate key
   const existing = await prisma.project.findUnique({
@@ -73,7 +73,13 @@ export async function create(data: {
   }
 
   const project = await prisma.project.create({
-    data,
+    data: {
+      name: data.name,
+      description: data.description,
+      key: data.key,
+      status: data.status,
+      settings: typeof data.settings === 'object' ? JSON.stringify(data.settings) : data.settings,
+    },
   });
 
   return project;
@@ -95,9 +101,14 @@ export async function update(id: number, data: Record<string, unknown>) {
     }
   }
 
+  const updateData = { ...data };
+  if (typeof updateData.settings === 'object' && updateData.settings !== null) {
+    updateData.settings = JSON.stringify(updateData.settings);
+  }
+
   return prisma.project.update({
     where: { id },
-    data,
+    data: updateData as any,
   });
 }
 
